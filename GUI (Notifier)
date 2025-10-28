@@ -1,0 +1,140 @@
+--// Client-side: click-to-watch animals, plays alert + highlight when they spawn
+
+local ReplicatedStorage = game:GetService('ReplicatedStorage')
+local Workspace = game:GetService('Workspace')
+local Players = game:GetService('Players')
+local SoundService = game:GetService('SoundService')
+
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild('PlayerGui')
+
+--// Load animal data
+local AnimalsData =
+	require(ReplicatedStorage:WaitForChild('Datas'):WaitForChild('Animals'))
+local AnimalsFolder = Workspace:FindFirstChild('Animals') or Workspace
+
+--// Setup GUI
+local ScreenGui = Instance.new('ScreenGui')
+ScreenGui.Name = 'AnimalNotifierUI'
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = PlayerGui
+
+local Frame = Instance.new('Frame')
+Frame.Size = UDim2.new(0, 320, 0, 420)
+Frame.Position = UDim2.new(1, -330, 0, 50)
+Frame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+Frame.BackgroundTransparency = 0.15
+Frame.BorderSizePixel = 0
+Frame.Parent = ScreenGui
+
+local Title = Instance.new('TextLabel')
+Title.Size = UDim2.new(1, 0, 0, 30)
+Title.BackgroundTransparency = 1
+Title.Font = Enum.Font.GothamBold
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.TextScaled = true
+Title.Text = '🔔 Animal Watchlist'
+Title.Parent = Frame
+
+local Scroller = Instance.new('ScrollingFrame')
+Scroller.Size = UDim2.new(1, 0, 1, -30)
+Scroller.Position = UDim2.new(0, 0, 0, 30)
+Scroller.CanvasSize = UDim2.new(0, 0, 0, 0)
+Scroller.ScrollBarThickness = 6
+Scroller.BackgroundTransparency = 1
+Scroller.Parent = Frame
+
+local UIList = Instance.new('UIListLayout')
+UIList.Padding = UDim.new(0, 2)
+UIList.Parent = Scroller
+
+--// Audio setup
+local AlertSound = Instance.new('Sound')
+AlertSound.SoundId = 'rbxassetid://12221967' -- (classic ping, can change)
+AlertSound.Volume = 1
+AlertSound.Parent = SoundService
+
+--// Core lists
+local watched = {} -- names you’ve clicked to watch
+local labels = {} -- reference for label objects
+local highlightTimers = {}
+
+--// Setup ordered list
+local orderedNames = {}
+for name in pairs(AnimalsData) do
+	table.insert(orderedNames, name)
+end
+table.sort(orderedNames)
+
+--// Create clickable labels
+for _, name in ipairs(orderedNames) do
+	local label = Instance.new('TextButton')
+	label.Size = UDim2.new(1, -5, 0, 20)
+	label.BackgroundTransparency = 1
+	label.Font = Enum.Font.Gotham
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.TextColor3 = Color3.fromRGB(180, 180, 180)
+	label.Text = '• ' .. name
+	label.AutoButtonColor = false
+	label.Parent = Scroller
+
+	label.MouseButton1Click:Connect(function()
+		if watched[name] then
+			watched[name] = nil
+			label.TextColor3 = Color3.fromRGB(180, 180, 180) -- back to default
+		else
+			watched[name] = true
+			label.TextColor3 = Color3.fromRGB(255, 215, 100) -- gold = watched
+		end
+	end)
+
+	labels[name] = label
+end
+Scroller.CanvasSize = UDim2.new(0, 0, 0, #orderedNames * 22)
+
+--// Visual helper: mark green if spawned
+local function setSpawned(name)
+	local label = labels[name]
+	if label then
+		label.TextColor3 = Color3.fromRGB(80, 255, 80)
+	end
+end
+
+--// Handle spawn notifications
+local function onAnimalSpawn(name)
+	if watched[name] then
+		AlertSound:Play()
+		local label = labels[name]
+		if label then
+			label.BackgroundTransparency = 0.3
+			label.BackgroundColor3 = Color3.fromRGB(255, 255, 100)
+			task.cancel(highlightTimers[name])
+			highlightTimers[name] = task.delay(30, function()
+				label.BackgroundTransparency = 1
+			end)
+		end
+	end
+end
+
+--// Initial pass for existing ones
+for _, obj in ipairs(AnimalsFolder:GetDescendants()) do
+	if labels[obj.Name] then
+		setSpawned(obj.Name)
+	end
+end
+
+--// Watch for new ones
+AnimalsFolder.DescendantAdded:Connect(function(obj)
+	if labels[obj.Name] then
+		setSpawned(obj.Name)
+		onAnimalSpawn(obj.Name)
+	end
+end)
+
+--// Optional despawn reset
+AnimalsFolder.DescendantRemoving:Connect(function(obj)
+	local label = labels[obj.Name]
+	if label and not watched[obj.Name] then
+		label.TextColor3 = Color3.fromRGB(180, 180, 180)
+	end
+end)
