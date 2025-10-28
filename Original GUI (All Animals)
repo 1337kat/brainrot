@@ -1,0 +1,98 @@
+--// Ordered animal list with live update (client-side)
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+local Players = game:GetService("Players")
+
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+--// Load animal data
+local AnimalsData = require(ReplicatedStorage:WaitForChild("Datas"):WaitForChild("Animals"))
+local AnimalsFolder = Workspace:FindFirstChild("Animals") or Workspace
+
+--// Prepare ordered list of all animal names
+local orderedNames = {}
+for name in pairs(AnimalsData) do
+	table.insert(orderedNames, name)
+end
+table.sort(orderedNames) -- optional: alphabetic order
+
+--// UI setup
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "OrderedAnimalsUI"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = PlayerGui
+
+local Frame = Instance.new("Frame")
+Frame.Size = UDim2.new(0, 300, 0, 400)
+Frame.Position = UDim2.new(1, -310, 0, 50)
+Frame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+Frame.BackgroundTransparency = 0.2
+Frame.Parent = ScreenGui
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, 0, 0, 30)
+Title.BackgroundTransparency = 1
+Title.Font = Enum.Font.GothamBold
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.TextScaled = true
+Title.Text = "🐾 Animal Progression"
+Title.Parent = Frame
+
+local Scroller = Instance.new("ScrollingFrame")
+Scroller.Size = UDim2.new(1, 0, 1, -30)
+Scroller.Position = UDim2.new(0, 0, 0, 30)
+Scroller.CanvasSize = UDim2.new(0, 0, 0, 0)
+Scroller.ScrollBarThickness = 6
+Scroller.BackgroundTransparency = 1
+Scroller.Parent = Frame
+
+local UIList = Instance.new("UIListLayout")
+UIList.Padding = UDim.new(0, 2)
+UIList.Parent = Scroller
+
+--// Create labels for every known animal
+local animalLabels = {}
+for _, name in ipairs(orderedNames) do
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.new(1, -5, 0, 20)
+	label.BackgroundTransparency = 1
+	label.Font = Enum.Font.Gotham
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.TextColor3 = Color3.fromRGB(180, 180, 180)
+	label.Text = "• " .. name
+	label.Parent = Scroller
+	animalLabels[name] = label
+end
+Scroller.CanvasSize = UDim2.new(0, 0, 0, #orderedNames * 22)
+
+--// Function to mark spawned ones
+local function updateLabel(name)
+	local label = animalLabels[name]
+	if label then
+		label.TextColor3 = Color3.fromRGB(80, 255, 80) -- green if spawned
+	end
+end
+
+--// Initially mark what already exists
+for _, obj in ipairs(AnimalsFolder:GetDescendants()) do
+	if animalLabels[obj.Name] then
+		updateLabel(obj.Name)
+	end
+end
+
+--// Listen for future spawns
+AnimalsFolder.DescendantAdded:Connect(function(obj)
+	if animalLabels[obj.Name] then
+		updateLabel(obj.Name)
+	end
+end)
+
+--// (Optional) Listen for removals
+AnimalsFolder.DescendantRemoving:Connect(function(obj)
+	local label = animalLabels[obj.Name]
+	if label then
+		label.TextColor3 = Color3.fromRGB(180, 180, 180) -- back to gray if despawned
+	end
+end)
