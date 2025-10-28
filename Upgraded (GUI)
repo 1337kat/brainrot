@@ -1,0 +1,290 @@
+--// 🧩 Animal Notifier v8 (Client-only, clean restart-loop for 30 s)
+--// Plays full alarm sound, restarts on Ended, stops after 30 s of no new alerts
+--// Draggable GUI • N = toggle • M = mute
+
+--------------------------- Services ---------------------------
+local ReplicatedStorage = game:GetService('ReplicatedStorage')
+local Workspace = game:GetService('Workspace')
+local Players = game:GetService('Players')
+local TweenService = game:GetService('TweenService')
+local SoundService = game:GetService('SoundService')
+local UserInputService = game:GetService('UserInputService')
+
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild('PlayerGui')
+
+----------------------------- Config ----------------------------
+local Config = {
+	AlarmSoundId = 'rbxassetid://1844062556', -- any siren / alarm
+	PingSoundId = 'rbxassetid://12221967',
+	AlarmVolume = 0.6,
+	AlarmDuration = 30, -- total time active (sec)
+	ToggleKey = Enum.KeyCode.N,
+	MuteKey = Enum.KeyCode.M,
+	UI = {
+		Width = 320,
+		Height = 420,
+		DefaultPosition = UDim2.new(1, -330, 0, 50),
+	},
+}
+
+------------------------------ Data -----------------------------
+local AnimalsData =
+	require(ReplicatedStorage:WaitForChild('Datas'):WaitForChild('Animals'))
+local AnimalsFolder = Workspace:FindFirstChild('Animals') or Workspace
+
+--------------------------- Audio System ------------------------
+local Alarm = Instance.new('Sound')
+Alarm.Name, Alarm.SoundId, Alarm.Looped, Alarm.Volume =
+	'NotifierAlarm', Config.AlarmSoundId, false, 0
+Alarm.Parent = SoundService
+
+local lastAlertTime = 0
+local active = false
+local durationThread
+
+-- restart exactly when sound ends, until time window expires
+Alarm.Ended:Connect(function()
+	if active and (os.clock() - lastAlertTime) < Config.AlarmDuration then
+		Alarm.TimePosition = 0
+		Alarm:Play()
+	end
+end)
+
+local function StartAlarm()
+	lastAlertTime = os.clock()
+	if not active then
+		active = true
+		Alarm.Volume = 0
+		Alarm:Play()
+		TweenService
+			:Create(Alarm, TweenInfo.new(0.3), { Volume = Config.AlarmVolume })
+			:Play()
+		-- watcher thread to stop after window
+		if durationThread then
+			task.cancel(durationThread)
+		end
+		durationThread = task.spawn(function()
+			while task.wait(0.5) do
+				if (os.clock() - lastAlertTime) >= Config.AlarmDuration then
+					TweenService
+						:Create(Alarm, TweenInfo.new(0.5), { Volume = 0 })
+						:Play()
+					task.wait(0.55)
+					Alarm:Stop()
+					active = false
+					break
+				end
+			end
+		end)
+	end
+end
+
+local function Ping()
+	local s = Instance.new('Sound')
+	s.SoundId, s.Volume, s.Parent = Config.PingSoundId, 0.9, SoundService
+	s:Play()
+	game.Debris:AddItem(s, 3)
+end
+
+local function MuteAlarm()
+	if active then
+		active = false
+		Alarm:Stop()
+	end
+end
+
+------------------------ Toast Notifications --------------------
+local NotificationGui = Instance.new('ScreenGui')
+NotificationGui.Name, NotificationGui.ResetOnSpawn = 'NotificationUI', false
+NotificationGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+NotificationGui.Parent = PlayerGui
+
+local Holder = Instance.new('Frame')
+Holder.AnchorPoint, Holder.Position, Holder.Size =
+	Vector2.new(0.5, 0), UDim2.new(0.5, 0, 0.05, 0), UDim2.new(0, 400, 0, 0)
+Holder.BackgroundTransparency = 1
+Holder.Parent = NotificationGui
+
+local list = Instance.new('UIListLayout', Holder)
+list.Padding, list.HorizontalAlignment, list.VerticalAlignment =
+	UDim.new(0, 6), Enum.HorizontalAlignment.Center, Enum.VerticalAlignment.Top
+
+local function Notify(title, color, duration)
+	local toast = Instance.new('Frame')
+	toast.Size, toast.BackgroundColor3, toast.BackgroundTransparency =
+		UDim2.new(0, 350, 0, 50), color or Color3.fromRGB(255, 210, 80), 1
+	toast.BorderSizePixel, toast.Parent = 0, Holder
+
+	local txt = Instance.new('TextLabel')
+	txt.BackgroundTransparency = 1
+	txt.Size, txt.Position = UDim2.new(1, -20, 1, 0), UDim2.new(0, 10, 0, 0)
+	txt.Font, txt.TextColor3, txt.TextScaled, txt.TextTransparency =
+		Enum.Font.GothamBold, Color3.new(0, 0, 0), true, 1
+	txt.Text, txt.Parent = title, toast
+
+	TweenService
+		:Create(toast, TweenInfo.new(0.25), { BackgroundTransparency = 0 })
+		:Play()
+	TweenService:Create(txt, TweenInfo.new(0.25), { TextTransparency = 0 })
+		:Play()
+	Ping()
+	task.delay(duration or 8, function()
+		TweenService
+			:Create(toast, TweenInfo.new(0.4), { BackgroundTransparency = 1 })
+			:Play()
+		TweenService:Create(txt, TweenInfo.new(0.4), { TextTransparency = 1 })
+			:Play()
+		task.wait(0.5)
+		toast:Destroy()
+	end)
+end
+
+---------------------------- Main GUI ----------------------------
+local MainGui = Instance.new('ScreenGui')
+MainGui.Name, MainGui.ResetOnSpawn = 'AnimalNotifierUI', false
+MainGui.Parent = PlayerGui
+
+local Frame = Instance.new('Frame')
+Frame.Size, Frame.Position, Frame.BackgroundColor3 =
+	UDim2.new(0, Config.UI.Width, 0, Config.UI.Height),
+	Config.UI.DefaultPosition,
+	Color3.fromRGB(25, 25, 25)
+Frame.BackgroundTransparency, Frame.Active, Frame.Draggable = 0.1, true, true
+Frame.Parent = MainGui
+Instance.new('UICorner', Frame).CornerRadius = UDim.new(0, 10)
+local Stroke = Instance.new('UIStroke', Frame)
+Stroke.Color, Stroke.Thickness = Color3.fromRGB(60, 60, 60), 2
+
+local Title = Instance.new('TextLabel', Frame)
+Title.Size, Title.BackgroundTransparency = UDim2.new(1, 0, 0, 30), 1
+Title.Font, Title.TextColor3, Title.TextScaled =
+	Enum.Font.GothamBold, Color3.fromRGB(255, 255, 255), true
+Title.Text = '🐾 Animal Watchlist  (N: toggle • M: mute)'
+
+local Scroller = Instance.new('ScrollingFrame', Frame)
+Scroller.Size, Scroller.Position, Scroller.BackgroundTransparency, Scroller.ScrollBarThickness =
+	UDim2.new(1, 0, 1, -30), UDim2.new(0, 0, 0, 30), 1, 6
+local UIList = Instance.new('UIListLayout', Scroller)
+UIList.Padding = UDim.new(0, 2)
+
+----------------------------- Logic -----------------------------
+local Watched, Labels = {}, {}
+local guiVisible = true
+
+local Ordered = {}
+for name in pairs(AnimalsData) do
+	table.insert(Ordered, name)
+end
+table.sort(Ordered)
+
+for _, n in ipairs(Ordered) do
+	local b = Instance.new('TextButton')
+	b.Size, b.BackgroundTransparency = UDim2.new(1, -5, 0, 20), 1
+	b.Font, b.TextXAlignment, b.TextColor3 =
+		Enum.Font.Gotham,
+		Enum.TextXAlignment.Left,
+		Color3.fromRGB(180, 180, 180)
+	b.Text, b.AutoButtonColor, b.Parent = '• ' .. n, false, Scroller
+	b.MouseButton1Click:Connect(function()
+		if Watched[n] then
+			Watched[n] = nil
+			b.TextColor3 = Color3.fromRGB(180, 180, 180)
+		else
+			Watched[n] = true
+			b.TextColor3 = Color3.fromRGB(255, 215, 100)
+		end
+	end)
+	Labels[n] = b
+end
+Scroller.CanvasSize = UDim2.new(0, 0, 0, #Ordered * 22)
+
+local function Highlight(n)
+	local lbl = Labels[n]
+	if lbl then
+		lbl.BackgroundColor3, lbl.BackgroundTransparency =
+			Color3.fromRGB(255, 255, 150), 0.25
+		task.delay(30, function()
+			if lbl then
+				lbl.BackgroundTransparency = 1
+			end
+		end)
+	end
+end
+
+local function MarkSpawned(n)
+	local lbl = Labels[n]
+	if lbl then
+		lbl.TextColor3 = Color3.fromRGB(80, 255, 80)
+	end
+end
+
+local function Alert(n)
+	if not Watched[n] then
+		return
+	end
+	local data = AnimalsData[n]
+	local color = Color3.fromRGB(255, 230, 80)
+	if data and data.Rarity == 'Mythic' then
+		color = Color3.fromRGB(255, 80, 80)
+	elseif data and data.Rarity == 'Epic' then
+		color = Color3.fromRGB(100, 180, 255)
+	end
+	StartAlarm()
+	Notify('⚠️ ' .. n .. ' Spawned!', color, 8)
+	Highlight(n)
+end
+
+-- mark existing
+for _, o in ipairs(AnimalsFolder:GetDescendants()) do
+	if Labels[o.Name] then
+		MarkSpawned(o.Name)
+	end
+end
+
+AnimalsFolder.DescendantAdded:Connect(function(o)
+	local n = o.Name
+	if Labels[n] then
+		MarkSpawned(n)
+		Alert(n)
+	end
+end)
+
+AnimalsFolder.DescendantRemoving:Connect(function(o)
+	local n = o.Name
+	local lbl = Labels[n]
+	if lbl and not Watched[n] then
+		lbl.TextColor3 = Color3.fromRGB(180, 180, 180)
+	end
+end)
+
+---------------------- GUI Toggle / Mute ------------------------
+UserInputService.InputBegan:Connect(function(input, gp)
+	if gp then
+		return
+	end
+	if input.KeyCode == Config.ToggleKey then
+		guiVisible = not guiVisible
+		if guiVisible then
+			Frame.Visible = true
+			TweenService:Create(
+				Frame,
+				TweenInfo.new(0.25),
+				{ BackgroundTransparency = 0.1 }
+			):Play()
+		else
+			TweenService
+				:Create(
+					Frame,
+					TweenInfo.new(0.25),
+					{ BackgroundTransparency = 1 }
+				)
+				:Play()
+			task.delay(0.25, function()
+				Frame.Visible = false
+			end)
+		end
+	elseif input.KeyCode == Config.MuteKey then
+		MuteAlarm()
+	end
+end)
