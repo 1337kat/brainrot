@@ -1,0 +1,42 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+local Players = game:GetService("Players")
+
+local Animals = require(ReplicatedStorage:WaitForChild("Datas"):WaitForChild("Animals"))
+local PlotController = require(ReplicatedStorage.Controllers:WaitForChild("PlotController"))
+
+local localPlot = PlotController:GetMyPlot()
+local Plots = Workspace:WaitForChild("Plots")
+local Rendered = Workspace:FindFirstChild("RenderedMovingAnimals")
+
+local ownership, wild = {}, {}
+
+for _, plot in ipairs(Plots:GetChildren()) do
+	local ownerName = (plot == localPlot) and ("You ("..Players.LocalPlayer.Name..")") or "Other Player"
+	for _, obj in ipairs(plot:GetChildren()) do
+		if obj:IsA("Model") and Animals[obj.Name] then
+			ownership[ownerName] = ownership[ownerName] or {}
+			table.insert(ownership[ownerName], obj.Name)
+		end
+	end
+end
+
+if Rendered then
+	for _, obj in ipairs(Rendered:GetChildren()) do
+		if obj:IsA("Model") and Animals[obj.Name] then
+			table.insert(wild, obj.Name)
+		end
+	end
+end
+
+for owner, list in pairs(ownership) do
+	table.sort(list)
+	print(("🐾 %s owns %d Brainrots:"):format(owner, #list))
+	for _, name in ipairs(list) do print("   - "..name) end
+end
+
+if #wild > 0 then
+	table.sort(wild)
+	print(("\n🌿 %d Roaming Brainrots in the world:"):format(#wild))
+	for _, name in ipairs(wild) do print("   - "..name) end
+end
