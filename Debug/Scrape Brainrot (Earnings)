@@ -1,5 +1,5 @@
 --// ==========================================================
---//  CLIENT: Pure $/s Scraper (prints only "$…/s")
+--//  CLIENT: Pure $/s Scraper (sorted highest → lowest)
 --// ==========================================================
 local Players = game:GetService('Players')
 local Workspace = game:GetService('Workspace')
@@ -21,30 +21,55 @@ local function cleaned(s)
     return s:lower()
 end
 
--- pattern for "$125/s", "$1.2k/s", "$5m/s", etc. (no spaces because we removed them)
-local function looksLikeRate(s) -- s already cleaned
-    -- $<number><optional k/m/b>/s  (e.g., $125/s, $1.2k/s, $5m/s)
+-- pattern for "$125/s", "$1.2k/s", "$5m/s", etc.
+local function looksLikeRate(s)
     return s:match('^%$[%d%.]+[kmb]?/s$') ~= nil
 end
 
+-- convert "$1.2k/s" → 1200 (number)
+local function parseRate(s)
+    local num, suffix = s:match('%$(%d+%.?%d*)([kmb]?)/s')
+    num = tonumber(num) or 0
+    if suffix == 'k' then
+        num *= 1e3
+    elseif suffix == 'm' then
+        num *= 1e6
+    elseif suffix == 'b' then
+        num *= 1e9
+    end
+    return num
+end
+
+-- gather all "$…/s" strings
 for _, root in ipairs(roots) do
     if root and root.GetDescendants then
         for _, obj in ipairs(root:GetDescendants()) do
-            -- catch any UI object that *has* a Text property (Label, Button, Box, etc.)
             local ok, txt = pcall(function()
                 return obj.Text
             end)
             if ok and type(txt) == 'string' and #txt > 0 then
                 local c = cleaned(txt)
-                if looksLikeRate(c) and not seen[txt] then
-                    seen[txt] = true
+                if looksLikeRate(c) and not seen[c] then
+                    seen[c] = true
                 end
             end
         end
     end
 end
 
--- print only the distinct "$…/s" values
+-- convert to array for sorting
+local rates = {}
 for rate, _ in pairs(seen) do
+    table.insert(rates, rate)
+end
+
+-- sort highest to lowest by numeric value
+table.sort(rates, function(a, b)
+    return parseRate(a) > parseRate(b)
+end)
+
+-- print sorted list
+print('=== Sorted $/s (highest → lowest) ===')
+for _, rate in ipairs(rates) do
     print(rate)
 end
