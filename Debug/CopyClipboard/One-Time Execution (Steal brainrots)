@@ -1,0 +1,149 @@
+--// ==========================================================
+--//  ONE-SHOT BRAINROT STEAL DIAGNOSTIC SNAPSHOT + TRAIL TRACE
+--//  Captures route, duration, distance, and effort reasoning
+--// ==========================================================
+
+local Players = game:GetService("Players")
+local StarterGui = game:GetService("StarterGui")
+local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
+
+local PRINT_DEBUG = true
+local active = false
+local record = {
+	startPos = nil,
+	endPos = nil,
+	startTime = nil,
+	endTime = nil,
+	stealName = nil,
+	trail = {}, -- holds Vector3s of the path
+}
+
+local function log(msg)
+	if PRINT_DEBUG then print(msg) end
+end
+
+local function notify(title, text)
+	pcall(function()
+		StarterGui:SetCore("SendNotification", {
+			Title = title,
+			Text = text,
+			Duration = 3
+		})
+	end)
+end
+
+local function getRoot()
+	local char = LocalPlayer.Character
+	return char and char:FindFirstChild("HumanoidRootPart")
+end
+
+local function distance(a, b)
+	return (a - b).Magnitude
+end
+
+local function classifyEffort(duration, dist)
+	if duration > 6 or dist > 200 then
+		return "Manual labor-intensive 🏋️"
+	elseif duration > 2 or dist > 50 then
+		return "Moderate carry 🚶"
+	elseif duration <= 2 and dist < 20 then
+		return "Instant/assisted ⚡"
+	else
+		return "Likely manual but brief 🏃"
+	end
+end
+
+local function exportClipboard(lines)
+	if not setclipboard then
+		print("⚠️ Clipboard not supported.")
+		return
+	end
+	setclipboard("```diff\n" .. table.concat(lines, "\n") .. "\n```")
+	print("📋 Diagnostic snapshot copied to clipboard.")
+end
+
+local function finalize()
+	record.endTime = tick()
+	local root = getRoot()
+	if root then record.endPos = root.Position end
+
+	local duration = record.endTime - record.startTime
+	local dist = record.startPos and record.endPos and distance(record.startPos, record.endPos) or 0
+	local effort = classifyEffort(duration, dist)
+
+	local lines = {
+		"📸 Brainrot Steal Diagnostic Snapshot",
+		("⏰ %s"):format(os.date("%H:%M:%S")),
+		("🎯 Target: %s"):format(record.stealName or "Unknown"),
+		("⏱ Duration: %.2fs"):format(duration),
+		("📏 Distance moved: %.1f studs"):format(dist),
+		("🧠 Effort rating: %s"):format(effort),
+		("🧩 Trail points recorded: %d"):format(#record.trail),
+	}
+
+	-- add trail preview (first few + last)
+	if #record.trail > 0 then
+		table.insert(lines, "")
+		table.insert(lines, "📍 Trail sample (x, y, z):")
+		local previewCount = math.min(5, #record.trail)
+		for i = 1, previewCount do
+			local p = record.trail[i]
+			table.insert(lines, ("   • %.1f, %.1f, %.1f"):format(p.X, p.Y, p.Z))
+		end
+		if #record.trail > 5 then
+			local last = record.trail[#record.trail]
+			table.insert(lines, ("   … (skipped) …"))
+			table.insert(lines, ("   • %.1f, %.1f, %.1f [end]"):format(last.X, last.Y, last.Z))
+		end
+	end
+
+	table.insert(lines, "✅ Steal completed successfully.")
+
+	for _, v in ipairs(lines) do log(v) end
+	exportClipboard(lines)
+end
+
+local function listen()
+	log("⏳ Waiting for your next successful Brainrot steal...")
+
+	local wasStealing = false
+	local trailConn, attrConn
+
+	attrConn = LocalPlayer:GetAttributeChangedSignal("StealingIndex"):Connect(function()
+		local val = LocalPlayer:GetAttribute("StealingIndex")
+
+		if val and not wasStealing then
+			wasStealing = true
+			active = true
+			record.stealName = tostring(val)
+			record.startTime = tick()
+			local root = getRoot()
+			if root then record.startPos = root.Position end
+			log(("[⚡] Started stealing: %s"):format(record.stealName))
+			notify("Brainrot Steal", record.stealName .. " in progress…")
+
+			-- start trail recorder
+			trailConn = RunService.Heartbeat:Connect(function()
+				if active then
+					local r = getRoot()
+					if r then table.insert(record.trail, r.Position) end
+					task.wait(0.25)
+				end
+			end)
+
+		elseif not val and wasStealing and active then
+			active = false
+			wasStealing = false
+			if trailConn then trailConn:Disconnect() end
+			log("[✔] Delivery detected.")
+			notify("Brainrot Secured", "Success recorded!")
+
+			finalize()
+			attrConn:Disconnect()
+			log("🧾 One-shot diagnostic finished — re-run for next steal.")
+		end
+	end)
+end
+
+listen()
