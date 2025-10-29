@@ -1,0 +1,60 @@
+--// ==========================================================
+--//  CLIENT: Universal Brainrot Steal Tracker
+--//  Detects ANY successful steal -> print confirmation
+--// ==========================================================
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local LocalPlayer = Players.LocalPlayer
+
+-- === Optional settings ===
+local PRINT_DEBUG = true
+local NOTIFY = true
+
+-- === Optional notification helper ===
+local function notify(title, text)
+	if NOTIFY then
+		pcall(function()
+			game:GetService("StarterGui"):SetCore("SendNotification", {
+				Title = title,
+				Text = text,
+				Duration = 4
+			})
+		end)
+	end
+end
+
+-- === Detect steals by watching player attributes ===
+local function trackStealCompletion()
+	local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+
+	-- keep last known stealing state
+	local wasStealing = LocalPlayer:GetAttribute("StealingIndex") ~= nil
+
+	LocalPlayer:GetAttributeChangedSignal("StealingIndex"):Connect(function()
+		local newVal = LocalPlayer:GetAttribute("StealingIndex")
+
+		-- started stealing
+		if newVal and not wasStealing then
+			wasStealing = true
+			if PRINT_DEBUG then
+				print("[⚡] Started stealing Brainrot:", newVal)
+			end
+			notify("Brainrot Steal", "You’ve started stealing a Brainrot!")
+		end
+
+		-- steal completed (attribute removed while previously stealing)
+		if not newVal and wasStealing then
+			wasStealing = false
+			if PRINT_DEBUG then
+				print("[✔] Successfully delivered stolen Brainrot to your plot!")
+			end
+			notify("Brainrot Secured", "You successfully delivered the stolen Brainrot!")
+		end
+	end)
+end
+
+-- === Run when character spawns ===
+LocalPlayer.CharacterAdded:Connect(trackStealCompletion)
+if LocalPlayer.Character then
+	trackStealCompletion()
+end
