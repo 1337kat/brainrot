@@ -1,0 +1,24 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local Synchronizer = require(ReplicatedStorage.Packages.Synchronizer)
+local Animals = require(ReplicatedStorage.Datas.Animals)
+
+-- Wait for your synced data
+local playerData = Synchronizer:Wait(LocalPlayer)
+local ownedNames = {}
+
+for _, podium in playerData:Get("AnimalPodiums") do
+	if type(podium) == "table" and podium.Index then
+		ownedNames[podium.Index] = true
+	end
+end
+
+-- Compare against master list
+for name in pairs(Animals) do
+	if ownedNames[name] then
+		print("✅ You own:", name)
+	else
+		print("❌ Not owned:", name)
+	end
+end
