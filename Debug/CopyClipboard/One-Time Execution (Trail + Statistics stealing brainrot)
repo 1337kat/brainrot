@@ -1,0 +1,157 @@
+--// ==========================================================
+--//  ONE-SHOT BRAINROT STEAL DIAGNOSTIC SNAPSHOT + 3D TRAIL
+--//  Shows path in-game + copies summary to clipboard
+--// ==========================================================
+
+local Players = game:GetService("Players")
+local StarterGui = game:GetService("StarterGui")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+local LocalPlayer = Players.LocalPlayer
+
+local PRINT_DEBUG = true
+local active = false
+local record = {
+	startPos = nil,
+	endPos = nil,
+	startTime = nil,
+	endTime = nil,
+	stealName = nil,
+	trail = {},
+}
+
+-- ========== helpers ==========
+local function log(msg)
+	if PRINT_DEBUG then print(msg) end
+end
+
+local function notify(title, text)
+	pcall(function()
+		StarterGui:SetCore("SendNotification", {
+			Title = title,
+			Text = text,
+			Duration = 3
+		})
+	end)
+end
+
+local function getRoot()
+	local c = LocalPlayer.Character
+	return c and c:FindFirstChild("HumanoidRootPart")
+end
+
+local function dist(a, b)
+	return (a - b).Magnitude
+end
+
+local function classifyEffort(t, d)
+	if t > 6 or d > 200 then return "Manual labor-intensive 🏋️"
+	elseif t > 2 or d > 50 then return "Moderate carry 🚶"
+	elseif t <= 2 and d < 20 then return "Instant/assisted ⚡"
+	else return "Likely manual but brief 🏃" end
+end
+
+local function exportClipboard(lines)
+	if not setclipboard then
+		print("⚠️ Clipboard not supported.")
+		return
+	end
+	setclipboard("```diff\n" .. table.concat(lines, "\n") .. "\n```")
+	print("📋 Diagnostic snapshot copied to clipboard.")
+end
+
+-- ========== simple trail rendering ==========
+local function renderTrail(points)
+	if #points < 2 then return end
+	for i = 1, #points - 1 do
+		local a, b = points[i], points[i + 1]
+		local seg = Instance.new("Part")
+		seg.Anchored, seg.CanCollide = true, false
+		seg.Material = Enum.Material.Neon
+		seg.Color = Color3.fromRGB(0, 255, 150)
+		seg.Size = Vector3.new(0.2, 0.2, dist(a, b))
+		seg.CFrame = CFrame.new(a, b) * CFrame.new(0, 0, -seg.Size.Z / 2)
+		seg.Parent = Workspace
+		game.Debris:AddItem(seg, 10) -- auto remove after 10s
+	end
+end
+
+-- ========== finalize snapshot ==========
+local function finalize()
+	record.endTime = tick()
+	local root = getRoot()
+	if root then record.endPos = root.Position end
+
+	local duration = record.endTime - record.startTime
+	local distance = record.startPos and record.endPos and dist(record.startPos, record.endPos) or 0
+	local effort = classifyEffort(duration, distance)
+	local avgSpeed = distance / duration
+
+	local lines = {
+		"📸 Brainrot Steal Diagnostic Snapshot",
+		("⏰ %s"):format(os.date("%H:%M:%S")),
+		("🎯 Target: %s"):format(record.stealName or "Unknown"),
+		("⏱ Duration: %.2fs"):format(duration),
+		("📏 Distance moved: %.1f studs"):format(distance),
+		("🚀 Avg speed: %.1f studs/s"):format(avgSpeed),
+		("🧠 Effort rating: %s"):format(effort),
+		("🧩 Trail points recorded: %d"):format(#record.trail),
+		"✅ Steal completed successfully."
+	}
+
+	renderTrail(record.trail)   -- draw the route
+	for _, v in ipairs(lines) do log(v) end
+	exportClipboard(lines)
+end
+
+-- ========== listen for one steal ==========
+local function listen()
+	log("⏳ Waiting for your next successful Brainrot steal...")
+	local wasStealing = false
+	local attrConn, trailConn
+
+	attrConn = LocalPlayer:GetAttributeChangedSignal("StealingIndex"):Connect(function()
+		local val = LocalPlayer:GetAttribute("StealingIndex")
+
+		if val and not wasStealing then
+			wasStealing = true
+			active = true
+			record.stealName = tostring(val)
+			record.startTime = tick()
+			local r = getRoot()
+			if r then record.startPos = r.Position end
+			log("[⚡] Started stealing: " .. record.stealName)
+			notify("Brainrot Steal", record.stealName .. " in progress…")
+
+			-- start trail recorder
+			local lastSample = 0
+			trailConn = RunService.Heartbeat:Connect(function()
+				if not active then return end
+				local now = tick()
+				if now - lastSample >= 0.25 then
+					lastSample = now
+					local root = getRoot()
+					if root then
+						local p = root.Position
+						if #record.trail == 0 or dist(record.trail[#record.trail], p) > 0.5 then
+							table.insert(record.trail, p)
+							if #record.trail > 400 then table.remove(record.trail, 1) end
+						end
+					end
+				end
+			end)
+
+		elseif not val and wasStealing and active then
+			active = false
+			wasStealing = false
+			if trailConn then trailConn:Disconnect() end
+			log("[✔] Delivery detected.")
+			notify("Brainrot Secured", "Success recorded!")
+			finalize()
+			attrConn:Disconnect()
+			log("🧾 One-shot diagnostic finished — re-run for next steal.")
+		end
+	end)
+end
+
+listen()
