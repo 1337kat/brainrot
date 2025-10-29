@@ -1,0 +1,73 @@
+--// ==========================================================
+--//  PRINT: All Player & Wild Brainrots
+--// ==========================================================
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+
+local LocalPlayer = Players.LocalPlayer
+local Animals = require(ReplicatedStorage:WaitForChild("Datas"):WaitForChild("Animals"))
+local Plots = Workspace:WaitForChild("Plots")
+local Rendered = Workspace:FindFirstChild("RenderedMovingAnimals")
+
+local ownership = {}
+local localPlot = nil
+
+-- Detect your own plot
+for _, plot in ipairs(Plots:GetChildren()) do
+	for _, obj in ipairs(plot:GetChildren()) do
+		if obj:IsA("Model") and Animals[obj.Name] then
+			localPlot = plot
+			break
+		end
+	end
+end
+
+-- Player-owned Brainrots
+for _, plot in ipairs(Plots:GetChildren()) do
+	local ownerName
+	if plot == localPlot then
+		ownerName = "You (" .. LocalPlayer.Name .. ")"
+	else
+		ownerName = plot.Name -- fallback UUID (unknown owner)
+	end
+
+	for _, obj in ipairs(plot:GetChildren()) do
+		if obj:IsA("Model") and Animals[obj.Name] then
+			ownership[ownerName] = ownership[ownerName] or {}
+			table.insert(ownership[ownerName], obj.Name)
+		end
+	end
+end
+
+-- Wild / roaming Brainrots
+local wild = {}
+if Rendered then
+	for _, obj in ipairs(Rendered:GetChildren()) do
+		if obj:IsA("Model") and Animals[obj.Name] then
+			table.insert(wild, obj.Name)
+		end
+	end
+end
+
+-- Print results
+if next(ownership) then
+	for owner, list in pairs(ownership) do
+		table.sort(list)
+		print(("🐾 %s owns %d Brainrots:"):format(owner, #list))
+		for _, name in ipairs(list) do
+			print("   - " .. name)
+		end
+	end
+else
+	print("⚠️ No player-owned Brainrots found under workspace.Plots.")
+end
+
+if #wild > 0 then
+	table.sort(wild)
+	print(("\n🌿 %d Roaming Brainrots in the world:"):format(#wild))
+	for _, name in ipairs(wild) do
+		print("   - " .. name)
+	end
+end
