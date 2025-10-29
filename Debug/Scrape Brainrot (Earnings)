@@ -1,0 +1,50 @@
+--// ==========================================================
+--//  CLIENT: Pure $/s Scraper (prints only "$…/s")
+--// ==========================================================
+local Players = game:GetService('Players')
+local Workspace = game:GetService('Workspace')
+local LocalPlayer = Players.LocalPlayer
+
+-- roots to scan (BillboardGuis in world + any UI mirrors in PlayerGui)
+local roots = {
+    Workspace,
+    LocalPlayer:FindFirstChild('PlayerGui'),
+}
+
+-- simple set to avoid duplicates
+local seen = {}
+
+-- strip RichText tags and compress whitespace
+local function cleaned(s)
+    s = s:gsub('<.->', '') -- remove richtext tags
+    s = s:gsub('%s+', '') -- remove all whitespace
+    return s:lower()
+end
+
+-- pattern for "$125/s", "$1.2k/s", "$5m/s", etc. (no spaces because we removed them)
+local function looksLikeRate(s) -- s already cleaned
+    -- $<number><optional k/m/b>/s  (e.g., $125/s, $1.2k/s, $5m/s)
+    return s:match('^%$[%d%.]+[kmb]?/s$') ~= nil
+end
+
+for _, root in ipairs(roots) do
+    if root and root.GetDescendants then
+        for _, obj in ipairs(root:GetDescendants()) do
+            -- catch any UI object that *has* a Text property (Label, Button, Box, etc.)
+            local ok, txt = pcall(function()
+                return obj.Text
+            end)
+            if ok and type(txt) == 'string' and #txt > 0 then
+                local c = cleaned(txt)
+                if looksLikeRate(c) and not seen[txt] then
+                    seen[txt] = true
+                end
+            end
+        end
+    end
+end
+
+-- print only the distinct "$…/s" values
+for rate, _ in pairs(seen) do
+    print(rate)
+end
