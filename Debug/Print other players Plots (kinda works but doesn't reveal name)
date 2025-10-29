@@ -1,0 +1,9 @@
+for _, plot in ipairs(workspace:WaitForChild("Plots"):GetChildren()) do
+	print("📦 Plot:", plot.Name)
+	for _, child in ipairs(plot:GetChildren()) do
+		print("   ↳", child.Name)
+		for _, sub in ipairs(child:GetChildren()) do
+			print("      •", sub.Name)
+		end
+	end
+end
