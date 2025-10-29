@@ -1,0 +1,109 @@
+--// ==========================================================
+--//  STATIC BRAINROT SNAPSHOT (Auto Player Detection + Clipboard)
+--// ==========================================================
+
+local Players = game:GetService('Players')
+local ReplicatedStorage = game:GetService('ReplicatedStorage')
+local Workspace = game:GetService('Workspace')
+
+local Animals =
+    require(ReplicatedStorage:WaitForChild('Datas'):WaitForChild('Animals'))
+local PlotController =
+    require(ReplicatedStorage.Controllers:WaitForChild('PlotController'))
+
+local localPlayer = Players.LocalPlayer
+local localUserId = localPlayer.UserId
+local localPlot = PlotController:GetMyPlot()
+local Plots = Workspace:WaitForChild('Plots')
+local Rendered = Workspace:FindFirstChild('RenderedMovingAnimals')
+
+local ownership, wild = {}, {}
+local activePlots, emptyPlots = 0, 0
+local buffer = {}
+local otherCount = 0
+
+local function line(text)
+    print(text)
+    table.insert(buffer, text)
+end
+
+-- helper to decide owner name
+local function getPlotOwnerName(plot)
+    local attrs = plot:GetAttributes()
+    if attrs.OwnerId and attrs.OwnerId == localUserId then
+        return 'You (' .. localPlayer.Name .. ')'
+    elseif attrs.OwnerId then
+        otherCount += 1
+        return 'Player #' .. otherCount
+    else
+        if plot == localPlot then
+            return 'You (' .. localPlayer.Name .. ')'
+        else
+            otherCount += 1
+            return 'Player #' .. otherCount
+        end
+    end
+end
+
+-- scan plots
+for _, plot in ipairs(Plots:GetChildren()) do
+    local ownerName = getPlotOwnerName(plot)
+    local animals = {}
+
+    for _, obj in ipairs(plot:GetDescendants()) do
+        if obj:IsA('Model') and Animals[obj.Name] then
+            table.insert(animals, obj.Name)
+        end
+    end
+
+    if #animals > 0 then
+        activePlots += 1
+        ownership[ownerName .. ' (active)'] = animals
+    else
+        emptyPlots += 1
+        ownership[ownerName .. ' (empty)'] = {}
+    end
+end
+
+-- find roaming animals
+if Rendered then
+    for _, obj in ipairs(Rendered:GetChildren()) do
+        if obj:IsA('Model') and Animals[obj.Name] then
+            table.insert(wild, obj.Name)
+        end
+    end
+end
+
+-- print report
+line('📸 Brainrot Snapshot — taken @ ' .. os.date('%H:%M:%S'))
+line(('📊 %d active plots, %d empty plots\n'):format(activePlots, emptyPlots))
+
+for owner, list in pairs(ownership) do
+    if #list > 0 then
+        table.sort(list)
+        line(('🐾 %s owns %d Brainrots:'):format(owner, #list))
+        for _, name in ipairs(list) do
+            line('   - ' .. name)
+        end
+    else
+        line(('⬜ %s has no Brainrots.'):format(owner))
+    end
+end
+
+if #wild > 0 then
+    table.sort(wild)
+    line(('\n🌿 %d Roaming Brainrots in the world:'):format(#wild))
+    for _, name in ipairs(wild) do
+        line('   - ' .. name)
+    end
+end
+
+line('\n✅ Static snapshot complete.')
+
+-- clipboard export (Discord formatted)
+if setclipboard then
+    setclipboard('```diff\n' .. table.concat(buffer, '\n') .. '\n```')
+    print('\n📋 Copied to clipboard successfully!')
+else
+    print('\n⚠️ Clipboard not supported in this environment.')
+end
