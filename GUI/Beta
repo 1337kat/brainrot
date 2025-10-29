@@ -1,0 +1,164 @@
+--// ==========================================================
+--//  CLIENT: Brainrot Plot Ownership Tracker (Accurate Workspace Scan)
+--// ==========================================================
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+local Player = Players.LocalPlayer
+
+-- Required data tables
+local Animals = require(ReplicatedStorage.Datas.Animals)
+local Rarities = require(ReplicatedStorage.Datas.Rarities)
+
+-- === GUI SETUP ===
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "BrainrotPlotGui"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.IgnoreGuiInset = true
+ScreenGui.Parent = Player:WaitForChild("PlayerGui")
+
+local Frame = Instance.new("Frame")
+Frame.Size = UDim2.new(0, 380, 0, 480)
+Frame.Position = UDim2.new(0, 20, 0.5, -240)
+Frame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+Frame.BorderSizePixel = 0
+Frame.BackgroundTransparency = 0.2
+Frame.Parent = ScreenGui
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, 0, 0, 30)
+Title.BackgroundTransparency = 1
+Title.Text = "🐾 BrainRots in Each Plot (True Workspace Scan)"
+Title.Font = Enum.Font.GothamBold
+Title.TextSize = 15
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.Parent = Frame
+
+local Scroller = Instance.new("ScrollingFrame")
+Scroller.Size = UDim2.new(1, -10, 1, -40)
+Scroller.Position = UDim2.new(0, 5, 0, 35)
+Scroller.BackgroundTransparency = 1
+Scroller.ScrollBarThickness = 6
+Scroller.AutomaticCanvasSize = Enum.AutomaticSize.Y
+Scroller.CanvasSize = UDim2.new(0, 0, 0, 0)
+Scroller.Parent = Frame
+
+local UIList = Instance.new("UIListLayout")
+UIList.Padding = UDim.new(0, 8)
+UIList.Parent = Scroller
+
+-- === UTILITIES ===
+
+local Plots = Workspace:WaitForChild("Plots")
+
+local function rarityColor(name)
+	local info = Animals[name]
+	if not info then return Color3.fromRGB(180, 180, 180) end
+	local r = Rarities[info.Rarity]
+	return r and r.Color or Color3.fromRGB(180, 180, 180)
+end
+
+local function getPlotOwnerName(plot)
+	local plotSign = plot:FindFirstChild("PlotSign", true)
+	if plotSign then
+		local label = plotSign:FindFirstChildWhichIsA("TextLabel", true)
+		if label and label.Text then
+			if label.Text == "Empty Base" then
+				return "🟦 Empty Base"
+			else
+				return "👤 " .. label.Text
+			end
+		end
+	end
+	return "❓ Unknown"
+end
+
+local function getPlotAnimals(plot)
+	local found = {}
+	for _, obj in ipairs(plot:GetDescendants()) do
+		if obj:IsA("Model") and Animals[obj.Name] then
+			table.insert(found, obj.Name)
+		end
+	end
+	table.sort(found)
+	return found
+end
+
+-- === GUI POPULATION ===
+
+local plotFrames = {}
+
+local function createPlotSection(plot)
+	local ownerName = getPlotOwnerName(plot)
+	local animals = getPlotAnimals(plot)
+
+	local container = Instance.new("Frame")
+	container.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+	container.BorderSizePixel = 0
+	container.AutomaticSize = Enum.AutomaticSize.Y
+	container.Size = UDim2.new(1, -10, 0, 30)
+	container.Name = ownerName .. "_Section"
+	container.Parent = Scroller
+
+	local nameLabel = Instance.new("TextLabel")
+	nameLabel.Size = UDim2.new(1, -10, 0, 22)
+	nameLabel.Position = UDim2.new(0, 5, 0, 4)
+	nameLabel.BackgroundTransparency = 1
+	nameLabel.Font = Enum.Font.GothamBold
+	nameLabel.TextSize = 15
+	nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+	nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+	nameLabel.Text = ownerName
+	nameLabel.Parent = container
+
+	local animalsLabel = Instance.new("TextLabel")
+	animalsLabel.BackgroundTransparency = 1
+	animalsLabel.Font = Enum.Font.Code
+	animalsLabel.TextSize = 13
+	animalsLabel.TextXAlignment = Enum.TextXAlignment.Left
+	animalsLabel.TextYAlignment = Enum.TextYAlignment.Top
+	animalsLabel.Position = UDim2.new(0, 5, 0, 24)
+	animalsLabel.Size = UDim2.new(1, -10, 0, 0)
+	animalsLabel.AutomaticSize = Enum.AutomaticSize.Y
+	animalsLabel.RichText = true
+	animalsLabel.Parent = container
+
+	if #animals == 0 then
+		if ownerName == "🟦 Empty Base" then
+			animalsLabel.Text = "<i>Unclaimed Plot</i>"
+		else
+			animalsLabel.Text = "<i>No BrainRots Found</i>"
+		end
+	else
+		local lines = {}
+		for _, aName in ipairs(animals) do
+			local c = rarityColor(aName)
+			local hex = string.format("#%02x%02x%02x", c.R * 255, c.G * 255, c.B * 255)
+			table.insert(lines, string.format("<font color='%s'>%s</font>", hex, aName))
+		end
+		animalsLabel.Text = table.concat(lines, ", ")
+	end
+
+	plotFrames[plot] = container
+end
+
+local function clearAll()
+	for _, frame in pairs(plotFrames) do
+		frame:Destroy()
+	end
+	table.clear(plotFrames)
+end
+
+local function refreshAll()
+	clearAll()
+	for _, plot in ipairs(Plots:GetChildren()) do
+		createPlotSection(plot)
+	end
+end
+
+-- === INITIAL SCAN ===
+refreshAll()
+
+print("[BrainrotPlotGui] Accurate per-plot animal ownership display complete.")
