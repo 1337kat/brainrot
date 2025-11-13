@@ -1,0 +1,104 @@
+--// ==========================================================
+--//  PRINT-ONLY • Plot Ownership + Animals Scanner
+--// ==========================================================
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+
+local Animals = require(ReplicatedStorage.Datas.Animals)
+
+local Plots = Workspace:WaitForChild("Plots")
+
+-- ───────────────────────────────────────────────
+-- UTIL: Read owner from PlotSign text
+-- ───────────────────────────────────────────────
+local function getOwner(plot)
+    local sign = plot:FindFirstChild("PlotSign", true)
+    if not sign then return "Empty Base" end
+
+    local label = sign:FindFirstChildWhichIsA("TextLabel", true)
+    if not label or not label.Text then return "Empty Base" end
+
+    if label.Text == "Empty Base" or label.Text == "YOUR BASE" then
+        return "Empty Base"
+    end
+
+    return label.Text
+end
+
+-- ───────────────────────────────────────────────
+-- UTIL: Scan for animals inside the plot
+-- ───────────────────────────────────────────────
+local function getAnimals(plot)
+    local list = {}
+    for _, obj in ipairs(plot:GetDescendants()) do
+        if obj:IsA("Model") and Animals[obj.Name] then
+            table.insert(list, obj.Name)
+        end
+    end
+    table.sort(list)
+    return list
+end
+
+-- ───────────────────────────────────────────────
+-- PRINT FUNCTION
+-- ───────────────────────────────────────────────
+local function printPlotInfo(plot)
+    local owner = getOwner(plot)
+    local animals = getAnimals(plot)
+
+    print("────────────────────────────")
+    print("Plot:", plot.Name)
+    print("Owner:", owner)
+
+    if #animals == 0 then
+        print("Animals: none")
+    else
+        print("Animals:", table.concat(animals, ", "))
+    end
+end
+
+-- ───────────────────────────────────────────────
+-- LIVE UPDATER FOR EACH PLOT
+-- ───────────────────────────────────────────────
+local function connectPlot(plot)
+    -- Print initial state
+    printPlotInfo(plot)
+
+    -- Update when animals spawn/remove
+    plot.DescendantAdded:Connect(function(obj)
+        if obj:IsA("Model") and Animals[obj.Name] then
+            print("\n[UPDATE] Animal added to", plot.Name)
+            printPlotInfo(plot)
+        end
+    end)
+
+    plot.DescendantRemoving:Connect(function(obj)
+        if obj:IsA("Model") and Animals[obj.Name] then
+            print("\n[UPDATE] Animal removed from", plot.Name)
+            printPlotInfo(plot)
+        end
+    end)
+
+    -- Update when owner changes (sign text changes)
+    local sign = plot:FindFirstChild("PlotSign", true)
+    if sign then
+        local label = sign:FindFirstChildWhichIsA("TextLabel", true)
+        if label then
+            label:GetPropertyChangedSignal("Text"):Connect(function()
+                print("\n[UPDATE] Ownership changed for", plot.Name)
+                printPlotInfo(plot)
+            end)
+        end
+    end
+end
+
+-- ───────────────────────────────────────────────
+-- INITIAL SCAN
+-- ───────────────────────────────────────────────
+for _, plot in ipairs(Plots:GetChildren()) do
+    connectPlot(plot)
+end
+
+print("[PrintOnlyPlotScanner] Active.")
