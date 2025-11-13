@@ -1,0 +1,97 @@
+--// ==========================================================
+--//  CLIENT: $/s + Animal Name Scraper (Plots Only)
+--// ==========================================================
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+
+local roots = { Workspace }
+local seen = {}
+
+local function cleaned(s)
+    s = s:gsub("<.->","")
+    s = s:gsub("%s+","")
+    return s:lower()
+end
+
+local function looksLikeRate(s)
+    return s:match("^%$[%d%.]+[kmb]?/s$") ~= nil
+end
+
+local function parseRate(s)
+    local num, suf = s:match("%$(%d+%.?%d*)([kmb]?)/s")
+    num = tonumber(num) or 0
+    if suf == "k" then num *= 1e3 end
+    if suf == "m" then num *= 1e6 end
+    if suf == "b" then num *= 1e9 end
+    return num
+end
+
+local function getPath(obj)
+    local path = {}
+    local cur = obj
+    while cur do
+        table.insert(path, 1, cur.Name)
+        cur = cur.Parent
+    end
+    return table.concat(path, ".")
+end
+
+-- Extract animal name from siblings
+local function getAnimalName(rateLabel)
+    local gui = rateLabel:FindFirstAncestorWhichIsA("BillboardGui")
+    if not gui then return "(unknown)" end
+
+    local nameCandidate = nil
+
+    for _, child in ipairs(gui:GetDescendants()) do
+        local ok, text = pcall(function() return child.Text end)
+        if ok and type(text) == "string" and text ~= rateLabel.Text then
+            -- animal names never contain "$"
+            if not text:find("%$") then
+                -- This is most likely the animal name
+                nameCandidate = text
+            end
+        end
+    end
+
+    return nameCandidate or "(unknown)"
+end
+
+-- MAIN SCAN
+for _, root in ipairs(roots) do
+    for _, obj in ipairs(root:GetDescendants()) do
+        local ok, txt = pcall(function() return obj.Text end)
+        if ok and type(txt) == "string" and #txt > 0 then
+            local c = cleaned(txt)
+
+            if looksLikeRate(c) then
+                local path = getPath(obj)
+
+                if path:lower():find("plots") then
+                    local name = getAnimalName(obj)
+
+                    seen[#seen+1] = {
+                        raw = txt,
+                        num = parseRate(c),
+                        animal = name,
+                        path = path
+                    }
+                end
+            end
+        end
+    end
+end
+
+table.sort(seen, function(a, b)
+    return a.num > b.num
+end)
+
+print("=== Sorted $/s (Plots Only + Animal Names) ===")
+for _, info in ipairs(seen) do
+    print(string.format("%s | %s | %s → %s",
+        info.raw,
+        info.num,
+        info.animal,
+        info.path
+    ))
+end
