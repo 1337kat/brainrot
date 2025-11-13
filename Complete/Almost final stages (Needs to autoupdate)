@@ -1,0 +1,229 @@
+--============================================================
+-- PLOT + ANIMAL + $/s SCANNER + ESP (Highest Only + $/s Text)
+--============================================================
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+
+local Animals = require(ReplicatedStorage.Datas.Animals)
+local Plots = Workspace:WaitForChild("Plots")
+local Camera = Workspace.CurrentCamera
+
+--============================================================
+-- CLEANERS
+--============================================================
+local function cleaned(s)
+    s = s:gsub("<.->","")
+    s = s:gsub("%s+","")
+    return s:lower()
+end
+
+local function looksLikeRate(s)
+    return s:match("^%$[%d%.]+[kmb]?/s$") ~= nil
+end
+
+local function parseRate(s)
+    local num, suf = s:match("%$(%d+%.?%d*)([kmb]?)/s")
+    num = tonumber(num) or 0
+    if suf == "k" then num = num * 1e3 end
+    if suf == "m" then num = num * 1e6 end
+    if suf == "b" then num = num * 1e9 end
+    return num
+end
+
+local function formatRate(n)
+    if not n then return "(rate not found)" end
+    if n >= 1e9 then return string.format("$%.2fB/s", n/1e9) end
+    if n >= 1e6 then return string.format("$%.2fM/s", n/1e6) end
+    if n >= 1e3 then return string.format("$%.2fK/s", n/1e3) end
+    return "$"..n.."/s"
+end
+
+--============================================================
+-- OWNER / ANIMALS
+--============================================================
+local function getOwner(plot)
+    local sign = plot:FindFirstChild("PlotSign", true)
+    if not sign then return "Empty Base" end
+
+    local label = sign:FindFirstChildWhichIsA("TextLabel", true)
+    if not label then return "Empty Base" end
+    if label.Text == "Empty Base" or label.Text == "YOUR BASE" then
+        return "Empty Base"
+    end
+    return label.Text
+end
+
+local function getAnimals(plot)
+    local list = {}
+    for _, obj in ipairs(plot:GetDescendants()) do
+        if obj:IsA("Model") and Animals[obj.Name] then
+            list[#list+1] = obj.Name
+        end
+    end
+    table.sort(list)
+    return list
+end
+
+--============================================================
+-- FIND PLOT BY ANCESTRY
+--============================================================
+local function findPlot(inst)
+    local cur = inst
+    while cur and cur ~= Workspace do
+        if cur.Parent == Plots then
+            return cur
+        end
+        cur = cur.Parent
+    end
+    return nil
+end
+
+--============================================================
+-- Extract Animal Name from BillboardGui
+--============================================================
+local function extractAnimalName(rateLabel)
+    local gui = rateLabel:FindFirstAncestorWhichIsA("BillboardGui")
+    if not gui then return nil end
+
+    local name = nil
+    for _, child in ipairs(gui:GetDescendants()) do
+        local ok, txt = pcall(function() return child.Text end)
+        if ok and type(txt) == "string" and txt ~= rateLabel.Text then
+            if not txt:find("%$") then
+                name = txt
+            end
+        end
+    end
+    return name
+end
+
+--============================================================
+-- BUILD RATE TABLE FOR EACH PLOT
+--============================================================
+local PlotRates = {}
+
+for _, obj in ipairs(Workspace:GetDescendants()) do
+    local ok, txt = pcall(function() return obj.Text end)
+    if ok and type(txt) == "string" and #txt > 0 then
+        local c = cleaned(txt)
+
+        if looksLikeRate(c) then
+            local plot = findPlot(obj)
+            if plot then
+                local animalName = extractAnimalName(obj)
+                if animalName then
+                    PlotRates[plot] = PlotRates[plot] or {}
+                    PlotRates[plot][animalName] = {
+                        rate = parseRate(c),
+                        gui = obj
+                    }
+                end
+            end
+        end
+    end
+end
+
+--============================================================
+-- ESP ELEMENTS (circle + text)
+--============================================================
+local Circle = Drawing.new("Circle")
+Circle.Thickness = 2
+Circle.Color = Color3.fromRGB(0,255,0)
+Circle.Filled = false
+Circle.NumSides = 32
+Circle.Radius = 30
+Circle.Visible = false
+
+local RateText = Drawing.new("Text")
+RateText.Color = Color3.fromRGB(255,255,255)
+RateText.Size = 18
+RateText.Center = true
+RateText.Outline = true
+RateText.Visible = false
+
+--============================================================
+-- FIND HIGHEST-EARNING ANIMAL IN A PLOT
+--============================================================
+local function findHighestAnimal(plot)
+    local bestName = nil
+    local best = nil
+    local tbl = PlotRates[plot]
+    if not tbl then return nil end
+
+    for name, info in pairs(tbl) do
+        if (not best) or info.rate > best.rate then
+            best = info
+            bestName = name
+        end
+    end
+
+    return bestName, best
+end
+
+--============================================================
+-- FIND MODEL / ROOT PART
+--============================================================
+local function findAnimalModel(plot, name)
+    for _, obj in ipairs(plot:GetDescendants()) do
+        if obj:IsA("Model") and obj.Name == name then
+            local root = obj:FindFirstChild("HumanoidRootPart")
+                or obj:FindFirstChild("Root")
+                or obj:FindFirstChild("Head")
+                or obj.PrimaryPart
+            return obj, root
+        end
+    end
+    return nil
+end
+
+--============================================================
+-- ESP LOOP
+--============================================================
+RunService.RenderStepped:Connect(function()
+    local bestPlot = nil
+    local bestName = nil
+    local bestInfo = nil
+
+    -- Find global highest earning animal across ALL plots
+    for plot, _ in pairs(PlotRates) do
+        local aName, aInfo = findHighestAnimal(plot)
+        if aName and aInfo then
+            if not bestInfo or aInfo.rate > bestInfo.rate then
+                bestPlot = plot
+                bestName = aName
+                bestInfo = aInfo
+            end
+        end
+    end
+
+    if not bestName then
+        Circle.Visible = false
+        RateText.Visible = false
+        return
+    end
+
+    local model, root = findAnimalModel(bestPlot, bestName)
+    if not root then
+        Circle.Visible = false
+        RateText.Visible = false
+        return
+    end
+
+    local pos, vis = Camera:WorldToViewportPoint(root.Position)
+    if vis then
+        Circle.Visible = true
+        RateText.Visible = true
+
+        Circle.Position = Vector2.new(pos.X, pos.Y)
+        Circle.Radius = math.clamp(320 / pos.Z, 14, 40)
+
+        RateText.Position = Vector2.new(pos.X, pos.Y - Circle.Radius - 12)
+        RateText.Text = formatRate(bestInfo.rate)
+    else
+        Circle.Visible = false
+        RateText.Visible = false
+    end
+end)
