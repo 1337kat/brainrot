@@ -1,0 +1,75 @@
+--// ==========================================================
+--//  CLIENT: $/s Scraper (Plots Only)
+--// ==========================================================
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local LocalPlayer = Players.LocalPlayer
+
+-- Scan world BillboardGuis only (PlayerGui excluded now)
+local roots = { Workspace }
+
+local seen = {}
+
+local function cleaned(s)
+    s = s:gsub("<.->", "")
+    s = s:gsub("%s+", "")
+    return s:lower()
+end
+
+local function looksLikeRate(s)
+    return s:match("^%$[%d%.]+[kmb]?/s$") ~= nil
+end
+
+local function parseRate(s)
+    local num, suffix = s:match("%$(%d+%.?%d*)([kmb]?)/s")
+    num = tonumber(num) or 0
+    if suffix == "k" then num *= 1e3 end
+    if suffix == "m" then num *= 1e6 end
+    if suffix == "b" then num *= 1e9 end
+    return num
+end
+
+local function getPath(obj)
+    local path = {}
+    local cur = obj
+    while cur do
+        table.insert(path, 1, cur.Name)
+        cur = cur.Parent
+    end
+    return table.concat(path, ".")
+end
+
+-- MAIN SCAN
+for _, root in ipairs(roots) do
+    for _, obj in ipairs(root:GetDescendants()) do
+        local ok, txt = pcall(function() return obj.Text end)
+
+        if ok and type(txt) == "string" and #txt > 0 then
+            local c = cleaned(txt)
+
+            if looksLikeRate(c) then
+                local path = getPath(obj)
+
+                -- *** FILTER: MUST contain "Plots" anywhere in path ***
+                if path:lower():find("plots") then
+                    seen[#seen+1] = {
+                        raw = txt,
+                        path = path,
+                        num = parseRate(c),
+                    }
+                end
+            end
+        end
+    end
+end
+
+-- SORT highest → lowest
+table.sort(seen, function(a, b)
+    return a.num > b.num
+end)
+
+-- OUTPUT
+print("=== Sorted $/s (Plots Only) ===")
+for _, info in ipairs(seen) do
+    print(string.format("%s | %s → %s", info.raw, info.num, info.path))
+end
