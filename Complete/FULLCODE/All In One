@@ -13197,30 +13197,21 @@ task.spawn(function()
     loadstring(game:HttpGet("https://api.luarmor.net/files/v3/loaders/af487c213fc26278d57976f8e03a1b5b.lua"))()
 end)
 
-
-
 --============================================================
--- THREAD #2 — FULL LIVE PLOT + ANIMAL + $/s SCANNER + ESP
+-- THREAD #2 — MAIN LOGIC
 --============================================================
 task.spawn(function()
 
---============================================================
--- LIVE PLOT + ANIMAL + $/s SCANNER + ESP (Highest Only + Text)
--- WITH PROFESSIONAL FOVEAL-OPTIMAL (FOZ) RATE HUD
---============================================================
+local Players           = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace         = game:GetService("Workspace")
+local RunService        = game:GetService("RunService")
 
-local Players = game:GetService("Players")
-local ReplicatedService = game:GetService("ReplicatedStorage")
-local Workspace = game:GetService("Workspace")
-local RunService = game:GetService("RunService")
+local Animals     = require(ReplicatedStorage.Datas.Animals)
+local Plots       = Workspace:WaitForChild("Plots")
+local Camera      = Workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
 
-local Animals = require(ReplicatedService.Datas.Animals)
-local Plots = Workspace:WaitForChild("Plots")
-local Camera = Workspace.CurrentCamera
-
---============================================================
--- HELPERS: TEXT PARSING
---============================================================
 local function cleaned(s)
     s = s:gsub("<.->","")
     s = s:gsub("%s+","")
@@ -13240,131 +13231,114 @@ local function parseRate(clean)
     return num
 end
 
---============================================================
--- *** CLEAN NO-DECIMAL FORMATTER ***
---============================================================
 local function formatRate(n)
     if not n then return "(rate not found)" end
-
-    if n >= 1e9 then
-        return string.format("$%dB/s", math.floor(n / 1e9))
-    end
-    if n >= 1e6 then
-        return string.format("$%dM/s", math.floor(n / 1e6))
-    end
-    if n >= 1e3 then
-        return string.format("$%dK/s", math.floor(n / 1e3))
-    end
-
+    if n >= 1e9 then return string.format("$%dB/s", math.floor(n/1e9)) end
+    if n >= 1e6 then return string.format("$%dM/s", math.floor(n/1e6)) end
+    if n >= 1e3 then return string.format("$%dK/s", math.floor(n/1e3)) end
     return string.format("$%d/s", math.floor(n))
 end
 
---============================================================
--- OWNER + ANIMAL DETECTION
---============================================================
 local function getOwner(plot)
     local sign = plot:FindFirstChild("PlotSign", true)
     if not sign then return "Empty Base" end
 
-    local label = sign:FindFirstChildWhichIsA("TextLabel", true)
-    if not label or not label.Text then return "Empty Base" end
+    local lbl = sign:FindFirstChildWhichIsA("TextLabel", true)
+    if not lbl or not lbl.Text then return "Empty Base" end
+    local t = lbl.Text
 
-    local t = label.Text
     if t == "Empty Base" or t == "YOUR BASE" then return "Empty Base" end
-
     return t
 end
 
 local function getAnimals(plot)
     local list = {}
-    for _, obj in ipairs(plot:GetDescendants()) do
-        if obj:IsA("Model") and Animals[obj.Name] then
-            list[#list + 1] = obj.Name
+    for _, o in ipairs(plot:GetDescendants()) do
+        if o:IsA("Model") and Animals[o.Name] then
+            list[#list+1] = o.Name
         end
     end
     table.sort(list)
     return list
 end
 
---============================================================
--- IDENTIFY WHICH PLOT A LABEL BELONGS TO
---============================================================
 local function findPlot(inst)
     local cur = inst
     while cur and cur ~= Workspace do
-        if cur.Parent == Plots then return cur end
+        if cur.Parent == Plots then
+            return cur
+        end
         cur = cur.Parent
     end
     return nil
 end
 
---============================================================
--- EXTRACT ANIMAL NAME FROM BILLBOARDGUI
---============================================================
 local function extractAnimalName(rateLabel)
     local gui = rateLabel:FindFirstAncestorWhichIsA("BillboardGui")
     if not gui then return nil end
 
     local name
-    for _, child in ipairs(gui:GetDescendants()) do
-        local ok, txt = pcall(function() return child.Text end)
-        if ok and type(txt) == "string" and txt ~= rateLabel.Text then
-            if not txt:find("%$") then
-                name = txt
-            end
+    for _, c in ipairs(gui:GetDescendants()) do
+        local ok, txt = pcall(function() return c.Text end)
+        if ok and type(txt) == "string"
+            and txt ~= rateLabel.Text
+            and not txt:find("%$")
+        then
+            name = txt
         end
     end
     return name
 end
 
---============================================================
--- GLOBAL STATE STORAGE
---============================================================
-local PlotRates = {}
-local LabelIndex = {}
+local PlotRates  = {}  
+local LabelIndex = {}  
 
---============================================================
--- LABEL TRACKING + PROCESSING
---============================================================
-local function removeLabelMapping(label)
-    local meta = LabelIndex[label]
+local function removeLabelMapping(lbl)
+    local meta = LabelIndex[lbl]
     if not meta then return end
 
     local plot = meta.plot
-    local animal = meta.animal
+    local anim = meta.animal
 
-    if PlotRates[plot] and PlotRates[plot][animal] then
-        PlotRates[plot][animal] = nil
-        if not next(PlotRates[plot]) then PlotRates[plot] = nil end
+    if PlotRates[plot] and PlotRates[plot][anim] then
+        PlotRates[plot][anim] = nil
+        if not next(PlotRates[plot]) then
+            PlotRates[plot] = nil
+        end
     end
 
-    LabelIndex[label] = nil
+    LabelIndex[lbl] = nil
 end
 
-local function processLabel(label)
-    local ok, txt = pcall(function() return label.Text end)
-    if not ok or type(txt) ~= "string" then return removeLabelMapping(label) end
+local function processLabel(lbl)
+    local ok, txt = pcall(function() return lbl.Text end)
+    if not ok or type(txt) ~= "string" then
+        return removeLabelMapping(lbl)
+    end
 
     local clean = cleaned(txt)
-    if not looksLikeRate(clean) then return removeLabelMapping(label) end
+    if not looksLikeRate(clean) then
+        return removeLabelMapping(lbl)
+    end
 
-    local plot = findPlot(label)
-    if not plot then return removeLabelMapping(label) end
+    local plot = findPlot(lbl)
+    if not plot then
+        return removeLabelMapping(lbl)
+    end
 
-    local animalName = extractAnimalName(label)
-    if not animalName then return removeLabelMapping(label) end
+    local animal = extractAnimalName(lbl)
+    if not animal then
+        return removeLabelMapping(lbl)
+    end
 
     local rate = parseRate(clean)
 
     PlotRates[plot] = PlotRates[plot] or {}
-    PlotRates[plot][animalName] = { rate = rate, label = label }
-    LabelIndex[label] = { plot = plot, animal = animalName }
+    PlotRates[plot][animal] = { rate = rate, label = lbl }
+    LabelIndex[lbl] = { plot = plot, animal = animal }
 end
 
---============================================================
--- INITIAL HOOKING OF DESCENDANTS
---============================================================
-local function tryHookLabelCandidate(inst)
+local function tryHookLabel(inst)
     local ok = pcall(function() return inst.Text end)
     if not ok then return end
 
@@ -13376,17 +13350,16 @@ local function tryHookLabelCandidate(inst)
 end
 
 for _, inst in ipairs(Workspace:GetDescendants()) do
-    tryHookLabelCandidate(inst)
+    tryHookLabel(inst)
 end
 
-Workspace.DescendantAdded:Connect(tryHookLabelCandidate)
+Workspace.DescendantAdded:Connect(tryHookLabel)
 Workspace.DescendantRemoving:Connect(function(inst)
-    if LabelIndex[inst] then removeLabelMapping(inst) end
+    if LabelIndex[inst] then
+        removeLabelMapping(inst)
+    end
 end)
 
---============================================================
--- PRINT INITIAL SNAPSHOT
---============================================================
 local function printPlotInfo(plot)
     print("────────────────────────────")
     print("Plot:", plot.Name)
@@ -13400,10 +13373,10 @@ local function printPlotInfo(plot)
 
     print("Animals + Rates:")
     local map = PlotRates[plot] or {}
-    for _, name in ipairs(animals) do
-        local info = map[name]
+    for _, nm in ipairs(animals) do
+        local info = map[nm]
         local r = info and info.rate
-        print((" • %s (%s)"):format(name, formatRate(r)))
+        print((" • %s (%s)"):format(nm, formatRate(r)))
     end
 end
 
@@ -13412,23 +13385,6 @@ for _, plot in ipairs(Plots:GetChildren()) do
 end
 
 print("[Live Plot+Animal+$Rate+ESP System] Active.")
-
---============================================================
--- ESP ON HIGHEST PRODUCER
---============================================================
-local Circle = Drawing.new("Circle")
-Circle.Thickness = 2
-Circle.Color = Color3.fromRGB(0,255,0)
-Circle.Filled = false
-Circle.NumSides = 32
-Circle.Visible = false
-
-local RateText = Drawing.new("Text")
-RateText.Color = Color3.fromRGB(255,255,255)
-RateText.Size = 18
-RateText.Center = true
-RateText.Outline = true
-RateText.Visible = false
 
 local function findAnimalModel(plot, name)
     for _, obj in ipairs(plot:GetDescendants()) do
@@ -13441,7 +13397,6 @@ local function findAnimalModel(plot, name)
             return obj, root
         end
     end
-    return nil
 end
 
 local function findGlobalHighest()
@@ -13457,6 +13412,31 @@ local function findGlobalHighest()
 
     return bestPlot, bestName, bestInfo
 end
+
+local function isInFOV(worldPos, margin)
+    margin = margin or 0
+    local vp = Camera:WorldToViewportPoint(worldPos)
+    local scr = Camera.ViewportSize
+    local onScr = vp.Z > 0
+        and vp.X >= -margin and vp.X <= scr.X + margin
+        and vp.Y >= -margin and vp.Y <= scr.Y + margin
+
+    return onScr, Vector2.new(vp.X, vp.Y), vp.Z
+end
+
+local Circle = Drawing.new("Circle")
+Circle.Thickness = 2
+Circle.Color = Color3.fromRGB(0, 255, 0)
+Circle.Filled = false
+Circle.NumSides = 32
+Circle.Visible = false
+
+local RateText = Drawing.new("Text")
+RateText.Color = Color3.fromRGB(255, 255, 255)
+RateText.Size = 18
+RateText.Center = true
+RateText.Outline = true
+RateText.Visible = false
 
 RunService.RenderStepped:Connect(function()
     local bestPlot, bestName, bestInfo = findGlobalHighest()
@@ -13474,7 +13454,7 @@ RunService.RenderStepped:Connect(function()
         return
     end
 
-    local pos, onScreen = Camera:WorldToViewportPoint(root.Position)
+    local onScreen, pos2, depth = isInFOV(root.Position, 60)
     if not onScreen then
         Circle.Visible = false
         RateText.Visible = false
@@ -13482,18 +13462,13 @@ RunService.RenderStepped:Connect(function()
     end
 
     Circle.Visible = true
-    Circle.Position = Vector2.new(pos.X, pos.Y)
-    Circle.Radius = math.clamp(320 / math.max(pos.Z, 1), 14, 42)
+    Circle.Position = pos2
+    Circle.Radius = math.clamp(320 / math.max(depth, 1), 14, 42)
 
     RateText.Visible = true
     RateText.Text = formatRate(bestInfo.rate)
-    RateText.Position = Vector2.new(pos.X, pos.Y - Circle.Radius - 12)
+    RateText.Position = Vector2.new(pos2.X, pos2.Y - Circle.Radius - 12)
 end)
-
---============================================================
--- PROFESSIONAL FOZ (FOVEAL OPTIMAL ZONE) HUD
--- Slightly above center for lowest eye strain
---============================================================
 
 local FOZ_HUD = Drawing.new("Text")
 FOZ_HUD.Color = Color3.fromRGB(255, 255, 255)
@@ -13511,13 +13486,338 @@ RunService.RenderStepped:Connect(function()
         FOZ_HUD.Text = "N/A"
     end
 
-    -- PROFESSIONAL PLACEMENT:
-    -- 10% ABOVE CENTER (foveal optimal zone)
     FOZ_HUD.Position = Vector2.new(
         Camera.ViewportSize.X / 2,
         (Camera.ViewportSize.Y / 2) - (Camera.ViewportSize.Y * 0.10)
     )
 end)
 
--- END OF THREAD #2
+local TracerMain = Drawing.new("Line")
+local TracerGlow = Drawing.new("Line")
+local EndDot     = Drawing.new("Circle")
+
+TracerMain.Visible = false
+TracerGlow.Visible = false
+EndDot.Visible     = false
+
+TracerGlow.Transparency = 0.25
+EndDot.Filled = true
+EndDot.Color  = Color3.fromRGB(120, 255, 120)
+
+local FADE_SPEED   = 0.18
+local currentAlpha = 0
+
+RunService.RenderStepped:Connect(function()
+    local bestPlot, bestName, bestInfo = findGlobalHighest()
+
+    if not bestInfo then
+        currentAlpha = math.max(0, currentAlpha - FADE_SPEED)
+    else
+        currentAlpha = math.min(1, currentAlpha + FADE_SPEED)
+    end
+
+    local a = currentAlpha
+    TracerMain.Transparency = a
+    TracerGlow.Transparency = 0.25 * a
+    EndDot.Transparency     = a
+
+    if a <= 0.01 then
+        TracerMain.Visible = false
+        TracerGlow.Visible = false
+        EndDot.Visible     = false
+        return
+    end
+
+    if not bestPlot or not bestName then return end
+
+    local model, root = findAnimalModel(bestPlot, bestName)
+    if not root then return end
+
+    local onScreen, animalPos = isInFOV(root.Position, 60)
+    if not onScreen then
+        TracerMain.Visible = false
+        TracerGlow.Visible = false
+        EndDot.Visible     = false
+        return
+    end
+
+    local hudPos = FOZ_HUD.Position
+    local dist   = (hudPos - animalPos).Magnitude
+    local thick  = math.clamp(dist / 300, 1.8, 4)
+
+    TracerMain.Visible   = true
+    TracerMain.Color     = Color3.fromRGB(255, 255, 255)
+    TracerMain.Thickness = thick
+    TracerMain.From      = hudPos
+    TracerMain.To        = animalPos
+
+    TracerGlow.Visible   = true
+    TracerGlow.Color     = Color3.fromRGB(120, 255, 120)
+    TracerGlow.Thickness = thick * 2
+    TracerGlow.From      = hudPos
+    TracerGlow.To        = animalPos
+
+    EndDot.Visible  = true
+    EndDot.Position = animalPos
+    EndDot.Radius   = math.clamp(5 + (thick * 0.8), 5, 12)
+end)
+
+-- ========================================
+-- ENHANCED ARROW: MASSIVE + RGB + FLASH + PULSE
+-- LOGIC 100% PRESERVED
+-- ========================================
+local Arrow1 = Drawing.new("Line")
+local Arrow2 = Drawing.new("Line")
+local Arrow3 = Drawing.new("Line")
+
+local ArrowGlow1 = Drawing.new("Line")
+local ArrowGlow2 = Drawing.new("Line")
+local ArrowGlow3 = Drawing.new("Line")
+
+-- Main arrow: bold, rate-colored
+for _, L in ipairs({Arrow1, Arrow2, Arrow3}) do
+    L.Visible = false
+    L.Thickness = 5
+end
+
+-- Glow arrow: massive, RGB cycling
+for _, L in ipairs({ArrowGlow1, ArrowGlow2, ArrowGlow3}) do
+    L.Visible = false
+    L.Thickness = 13
+    L.Transparency = 0.6
+end
+
+local function getRateColor(rate)
+    if not rate then return Color3.fromRGB(255,255,255) end
+    if rate >= 1e9 then return Color3.fromRGB(80, 255, 255) end   
+    if rate >= 1e8 then return Color3.fromRGB(120, 255, 120) end  
+    if rate >= 1e7 then return Color3.fromRGB(255, 230, 120) end  
+    return Color3.fromRGB(255, 255, 255)
+end
+
+local pulsePhase = 0
+local rgbPhase = 0
+local flashPhase = 0
+
+RunService.RenderStepped:Connect(function(dt)
+    local bestPlot, bestName, bestInfo = findGlobalHighest()
+
+    local function hideArrow()
+        for _, L in ipairs({Arrow1, Arrow2, Arrow3, ArrowGlow1, ArrowGlow2, ArrowGlow3}) do
+            L.Visible = false
+        end
+    end
+
+    if not bestInfo or not bestPlot or not bestName then
+        hideArrow()
+        return
+    end
+
+    local model, root = findAnimalModel(bestPlot, bestName)
+    if not root then
+        hideArrow()
+        return
+    end
+
+    local cam    = Camera
+    local screen = cam.ViewportSize
+    local cx, cy = screen.X / 2, screen.Y / 2
+    local center = Vector2.new(cx, cy)
+
+    local vp = cam:WorldToViewportPoint(root.Position)
+    local pos2 = Vector2.new(vp.X, vp.Y)
+
+    local isOnScreen =
+        vp.Z > 0 and
+        pos2.X >= 0 and pos2.X <= screen.X and
+        pos2.Y >= 0 and pos2.Y <= screen.Y
+
+    if isOnScreen then
+        hideArrow()
+        return
+    end
+
+    if vp.Z < 0 then
+        pos2 = center - (pos2 - center)
+    end
+
+    local dir = pos2 - center
+    if dir.Magnitude < 1 then
+        dir = Vector2.new(0, -1)
+    else
+        dir = dir.Unit
+    end
+
+    local color = getRateColor(bestInfo.rate)
+
+    local margin = 35
+    local Lx = margin
+    local Rx = screen.X - margin
+    local Ty = margin
+    local By = screen.Y - margin
+
+    local tMin = math.huge
+    local hitX, hitY
+
+    if dir.X ~= 0 then
+        local tL = (Lx - cx) / dir.X
+        local yL = cy + dir.Y * tL
+        if tL > 0 and yL >= Ty and yL <= By and tL < tMin then
+            tMin = tL
+            hitX, hitY = Lx, yL
+        end
+    end
+
+    if dir.X ~= 0 then
+        local tR = (Rx - cx) / dir.X
+        local yR = cy + dir.Y * tR
+        if tR > 0 and yR >= Ty and yR <= By and tR < tMin then
+            tMin = tR
+            hitX, hitY = Rx, yR
+        end
+    end
+
+    if dir.Y ~= 0 then
+        local tT = (Ty - cy) / dir.Y
+        local xT = cx + dir.X * tT
+        if tT > 0 and xT >= Lx and xT <= Rx and tT < tMin then
+            tMin = tT
+            hitX, hitY = xT, Ty
+        end
+    end
+
+    if dir.Y ~= 0 then
+        local tB = (By - cy) / dir.Y
+        local xB = cx + dir.X * tB
+        if tB > 0 and xB >= Lx and xB <= Rx and tB < tMin then
+            tMin = tB
+            hitX, hitY = xB, By
+        end
+    end
+
+    if not hitX or not hitY then
+        hideArrow()
+        return
+    end
+
+    local tip = Vector2.new(hitX, hitY)
+
+    -- === PULSE + FLASH + RGB CYCLE ===
+    pulsePhase = pulsePhase + (dt or 0.016) * 3.5
+    rgbPhase = rgbPhase + (dt or 0.016) * 1.8
+    flashPhase = flashPhase + (dt or 0.016) * 7
+
+    local pulseScale = 0.85 + 0.25 * math.sin(pulsePhase)
+    local flash = (math.sin(flashPhase) > 0.6) and 1 or 0.7
+
+    -- === MASSIVE ARROW ===
+    local baseSize   = 44
+    local arrowSize  = baseSize * pulseScale
+    local arrowWidth = (baseSize * 0.7) * pulseScale
+
+    local base = tip - dir * arrowSize
+    local perp = Vector2.new(-dir.Y, dir.X)
+
+    local left  = base + perp * (arrowWidth / 2)
+    local right = base - perp * (arrowWidth / 2)
+
+    -- Main Arrow
+    Arrow1.Visible = true; Arrow2.Visible = true; Arrow3.Visible = true
+    Arrow1.Color = color; Arrow2.Color = color; Arrow3.Color = color
+
+    Arrow1.From = tip; Arrow1.To = left
+    Arrow2.From = tip; Arrow2.To = right
+    Arrow3.From = left; Arrow3.To = right
+
+    -- === RGB GLOW (MASSIVE + FLASHING) ===
+    local glowSize = arrowSize + 12
+    local glowWidth = arrowWidth + 14
+
+    local glowBase  = tip - dir * glowSize
+    local glowLeft  = glowBase + perp * (glowWidth / 2)
+    local glowRight = glowBase - perp * (glowWidth / 2)
+
+    local hue = (rgbPhase % 1)
+    local rgbColor = Color3.fromHSV(hue, 1, 1)
+
+    ArrowGlow1.Visible = true; ArrowGlow2.Visible = true; ArrowGlow3.Visible = true
+    ArrowGlow1.Color = rgbColor; ArrowGlow2.Color = rgbColor; ArrowGlow3.Color = rgbColor
+    ArrowGlow1.Transparency = 0.6 * flash
+    ArrowGlow2.Transparency = 0.6 * flash
+    ArrowGlow3.Transparency = 0.6 * flash
+
+    ArrowGlow1.From = tip; ArrowGlow1.To = glowLeft
+    ArrowGlow2.From = tip; ArrowGlow2.To = glowRight
+    ArrowGlow3.From = glowLeft; ArrowGlow3.To = glowRight
+end)
+
+local TEXT_FORWARD = 29
+local TEXT_RIGHT   = 0
+local TEXT_UP      = 7
+
+local BaseText = Drawing.new("Text")
+BaseText.Visible = false
+BaseText.Center  = true
+BaseText.Size    = 25
+BaseText.Font    = 2
+BaseText.Outline = true
+BaseText.Color   = Color3.fromRGB(255, 255, 255)
+BaseText.Text    = "YOUR BASE"
+pcall(function()
+    BaseText.OutlineColor = Color3.new(0, 0, 0)
+end)
+
+local function findMyPlot()
+    for _, plot in ipairs(Plots:GetChildren()) do
+        local sign = plot:FindFirstChild("PlotSign")
+        local gui  = sign and sign:FindFirstChild("SurfaceGui")
+        local fr   = gui and gui:FindFirstChild("Frame")
+        local lbl  = fr and fr:FindFirstChildWhichIsA("TextLabel")
+        if lbl and lbl.Text then
+            if lbl.Text == LocalPlayer.Name or lbl.Text == LocalPlayer.DisplayName
+            or lbl.Text:find(LocalPlayer.Name)
+            or lbl.Text:find(LocalPlayer.DisplayName) then
+                return plot
+            end
+        end
+    end
+end
+
+local MyPlot = findMyPlot()
+
+local function getAnchor(plot)
+    if not plot then return end
+    for _, o in ipairs(plot:GetDescendants()) do
+        if o:IsA("BasePart") then
+            return o
+        end
+    end
+end
+
+local Anchor = getAnchor(MyPlot)
+
+RunService.RenderStepped:Connect(function()
+    if not Anchor or not Anchor.Parent then
+        MyPlot = findMyPlot()
+        Anchor = getAnchor(MyPlot)
+        if not Anchor then
+            BaseText.Visible = false
+            return
+        end
+    end
+
+    local cf = Anchor.CFrame
+    local pos3 =
+        Anchor.Position +
+        cf.LookVector * TEXT_FORWARD +
+        cf.RightVector * TEXT_RIGHT +
+        cf.UpVector * TEXT_UP
+
+    local onScreen, pos2 = isInFOV(pos3, 30)
+    BaseText.Visible = onScreen
+    if onScreen then
+        BaseText.Position = pos2
+    end
+end)
+
 end)
