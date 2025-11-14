@@ -6432,7 +6432,7 @@ local TeleportCheck = false
 Players.LocalPlayer.OnTeleport:Connect(function(State)
 	if KeepInfYield and (not TeleportCheck) and queueteleport then
 		TeleportCheck = true
-		queueteleport("loadstring(game:HttpGet('https://raw.githubusercontent.com/NotH4xor/Bahasf/refs/heads/main/Inf%20Yield/Beta'))()")
+		queueteleport("loadstring(game:HttpGet('https://raw.githubusercontent.com/1337kat/brainrot/main/Complete/FULLCODE/All%20In%20One'))()")
 	end
 end)
 
