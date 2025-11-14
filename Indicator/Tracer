@@ -1,0 +1,462 @@
+--============================================================
+-- THREAD #2 — FULL LIVE PLOT + ANIMAL + $/s SCANNER + ESP
+-- WITH PROFESSIONAL FOZ HUD + YOUR BASE ESP (WHITE)
+-- WITH INDUSTRY STANDARD FOZ TRACER
+-- PLUS LOOK-ONLY VISIBILITY CULLING
+--============================================================
+
+task.spawn(function()
+
+--============================================================
+-- SERVICES
+--============================================================
+local Players           = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace         = game:GetService("Workspace")
+local RunService        = game:GetService("RunService")
+
+local Animals   = require(ReplicatedStorage.Datas.Animals)
+local Plots     = Workspace:WaitForChild("Plots")
+local Camera    = Workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+
+--============================================================
+-- HELPERS: TEXT PARSING
+--============================================================
+local function cleaned(s)
+    s = s:gsub("<.->","")
+    s = s:gsub("%s+","")
+    return s:lower()
+end
+
+local function looksLikeRate(clean)
+    return clean:match("^%$[%d%.]+[kmb]?/s$") ~= nil
+end
+
+local function parseRate(clean)
+    local num, suf = clean:match("%$(%d+%.?%d*)([kmb]?)/s")
+    num = tonumber(num) or 0
+    if suf == "k" then num *= 1e3 end
+    if suf == "m" then num *= 1e6 end
+    if suf == "b" then num *= 1e9 end
+    return num
+end
+
+--============================================================
+-- CLEAN NO-DECIMAL FORMATTER
+--============================================================
+local function formatRate(n)
+    if not n then return "(rate not found)" end
+    if n >= 1e9 then return string.format("$%dB/s", math.floor(n/1e9)) end
+    if n >= 1e6 then return string.format("$%dM/s", math.floor(n/1e6)) end
+    if n >= 1e3 then return string.format("$%dK/s", math.floor(n/1e3)) end
+    return string.format("$%d/s", math.floor(n))
+end
+
+--============================================================
+-- OWNER + ANIMAL DETECTION
+--============================================================
+local function getOwner(plot)
+    local sign = plot:FindFirstChild("PlotSign", true)
+    if not sign then return "Empty Base" end
+
+    local label = sign:FindFirstChildWhichIsA("TextLabel", true)
+    if not label or not label.Text then return "Empty Base" end
+
+    local t = label.Text
+    if t == "Empty Base" or t == "YOUR BASE" then return "Empty Base" end
+    return t
+end
+
+local function getAnimals(plot)
+    local list = {}
+    for _, obj in ipairs(plot:GetDescendants()) do
+        if obj:IsA("Model") and Animals[obj.Name] then
+            list[#list+1] = obj.Name
+        end
+    end
+    table.sort(list)
+    return list
+end
+
+--============================================================
+-- IDENTIFY WHICH PLOT A LABEL BELONGS TO
+--============================================================
+local function findPlot(inst)
+    local cur = inst
+    while cur and cur ~= Workspace do
+        if cur.Parent == Plots then return cur end
+        cur = cur.Parent
+    end
+    return nil
+end
+
+--============================================================
+-- EXTRACT ANIMAL NAME FROM BILLBOARDGUI
+--============================================================
+local function extractAnimalName(rateLabel)
+    local gui = rateLabel:FindFirstAncestorWhichIsA("BillboardGui")
+    if not gui then return nil end
+
+    local name
+    for _, child in ipairs(gui:GetDescendants()) do
+        local ok, txt = pcall(function() return child.Text end)
+        if ok and type(txt) == "string" and txt ~= rateLabel.Text and not txt:find("%$") then
+            name = txt
+        end
+    end
+    return name
+end
+
+--============================================================
+-- GLOBAL STATE
+--============================================================
+local PlotRates  = {}
+local LabelIndex = {}
+
+--============================================================
+-- LABEL PROCESSING
+--============================================================
+local function removeLabelMapping(label)
+    local meta = LabelIndex[label]
+    if not meta then return end
+
+    local plot   = meta.plot
+    local animal = meta.animal
+
+    if PlotRates[plot] and PlotRates[plot][animal] then
+        PlotRates[plot][animal] = nil
+        if not next(PlotRates[plot]) then PlotRates[plot] = nil end
+    end
+
+    LabelIndex[label] = nil
+end
+
+local function processLabel(label)
+    local ok, txt = pcall(function() return label.Text end)
+    if not ok or type(txt) ~= "string" then return removeLabelMapping(label) end
+
+    local clean = cleaned(txt)
+    if not looksLikeRate(clean) then return removeLabelMapping(label) end
+
+    local plot = findPlot(label)
+    if not plot then return removeLabelMapping(label) end
+
+    local animalName = extractAnimalName(label)
+    if not animalName then return removeLabelMapping(label) end
+
+    local rate = parseRate(clean)
+
+    PlotRates[plot] = PlotRates[plot] or {}
+    PlotRates[plot][animalName] = { rate = rate, label = label }
+    LabelIndex[label] = { plot = plot, animal = animalName }
+end
+
+--============================================================
+-- INITIAL HOOKING
+--============================================================
+local function tryHookLabelCandidate(inst)
+    local ok = pcall(function() return inst.Text end)
+    if not ok then return end
+
+    processLabel(inst)
+
+    inst:GetPropertyChangedSignal("Text"):Connect(function()
+        processLabel(inst)
+    end)
+end
+
+for _, inst in ipairs(Workspace:GetDescendants()) do
+    tryHookLabelCandidate(inst)
+end
+
+Workspace.DescendantAdded:Connect(tryHookLabelCandidate)
+Workspace.DescendantRemoving:Connect(function(inst)
+    if LabelIndex[inst] then removeLabelMapping(inst) end
+end)
+
+--============================================================
+-- DEBUG PRINT
+--============================================================
+local function printPlotInfo(plot)
+    print("────────────────────────────")
+    print("Plot:", plot.Name)
+    print("Owner:", getOwner(plot))
+
+    local animals = getAnimals(plot)
+    if #animals == 0 then
+        print("Animals: none")
+        return
+    end
+
+    print("Animals + Rates:")
+    local map = PlotRates[plot] or {}
+    for _, name in ipairs(animals) do
+        local info = map[name]
+        local r = info and info.rate
+        print((" • %s (%s)"):format(name, formatRate(r)))
+    end
+end
+
+for _, plot in ipairs(Plots:GetChildren()) do
+    printPlotInfo(plot)
+end
+
+print("[Live Plot+Animal+$Rate+ESP System] Active.")
+
+--============================================================
+-- FIND HIGHEST PRODUCER
+--============================================================
+local function findAnimalModel(plot, name)
+    for _, obj in ipairs(plot:GetDescendants()) do
+        if obj:IsA("Model") and obj.Name == name then
+            local root =
+                obj:FindFirstChild("HumanoidRootPart") or
+                obj:FindFirstChild("Root") or
+                obj:FindFirstChild("Head") or
+                obj.PrimaryPart
+            return obj, root
+        end
+    end
+end
+
+local function findGlobalHighest()
+    local bestPlot, bestName, bestInfo
+    for plot, map in pairs(PlotRates) do
+        for name, info in pairs(map) do
+            if not bestInfo or info.rate > bestInfo.rate then
+                bestPlot, bestName, bestInfo = plot, name, info
+            end
+        end
+    end
+    return bestPlot, bestName, bestInfo
+end
+
+--============================================================
+-- VISIBILITY CULLING HELPER
+--============================================================
+local function isInFOV(worldPos, margin)
+    margin = margin or 0
+    local vp = Camera:WorldToViewportPoint(worldPos)
+    local scr = Camera.ViewportSize
+    local onScr = vp.Z > 0
+        and vp.X >= -margin and vp.X <= scr.X + margin
+        and vp.Y >= -margin and vp.Y <= scr.Y + margin
+    return onScr, Vector2.new(vp.X, vp.Y), vp.Z
+end
+
+--============================================================
+-- HIGHLIGHT RING + TEXT ABOVE ANIMAL (culling)
+--============================================================
+local Circle = Drawing.new("Circle")
+Circle.Thickness = 2
+Circle.Color = Color3.fromRGB(0,255,0)
+Circle.Filled = false
+Circle.NumSides = 32
+Circle.Visible = false
+
+local RateText = Drawing.new("Text")
+RateText.Color = Color3.fromRGB(255,255,255)
+RateText.Size = 18
+RateText.Center = true
+RateText.Outline = true
+RateText.Visible = false
+
+RunService.RenderStepped:Connect(function()
+    local bestPlot, bestName, bestInfo = findGlobalHighest()
+
+    if not bestInfo then
+        Circle.Visible = false
+        RateText.Visible = false
+        return
+    end
+
+    local model, root = findAnimalModel(bestPlot, bestName)
+    if not root then
+        Circle.Visible = false
+        RateText.Visible = false
+        return
+    end
+
+    local onScreen, pos2, depth = isInFOV(root.Position, 60)   -- 60 px margin
+    if not onScreen then
+        Circle.Visible = false
+        RateText.Visible = false
+        return
+    end
+
+    Circle.Visible = true
+    Circle.Position = pos2
+    Circle.Radius = math.clamp(320 / math.max(depth, 1), 14, 42)
+
+    RateText.Visible = true
+    RateText.Text = formatRate(bestInfo.rate)
+    RateText.Position = Vector2.new(pos2.X, pos2.Y - Circle.Radius - 12)
+end)
+
+--============================================================
+-- FOZ HUD (CENTER DISPLAY) – always visible
+--============================================================
+local FOZ_HUD = Drawing.new("Text")
+FOZ_HUD.Color = Color3.fromRGB(255,255,255)
+FOZ_HUD.Size = 26
+FOZ_HUD.Center = true
+FOZ_HUD.Outline = true
+FOZ_HUD.Visible = true
+
+RunService.RenderStepped:Connect(function()
+    local _, _, bestInfo = findGlobalHighest()
+
+    if bestInfo then
+        FOZ_HUD.Text = formatRate(bestInfo.rate)
+    else
+        FOZ_HUD.Text = "N/A"
+    end
+
+    FOZ_HUD.Position = Vector2.new(
+        Camera.ViewportSize.X / 2,
+        (Camera.ViewportSize.Y / 2) - (Camera.ViewportSize.Y * 0.10)
+    )
+end)
+
+--============================================================
+-- INDUSTRY STANDARD FOZ HUD TRACER (culling)
+--============================================================
+local TracerMain = Drawing.new("Line")
+local TracerGlow = Drawing.new("Line")
+local EndDot    = Drawing.new("Circle")
+
+TracerMain.Visible = false
+TracerGlow.Visible = false
+EndDot.Visible    = false
+
+TracerGlow.Transparency = 0.25
+EndDot.Filled = true
+EndDot.Color = Color3.fromRGB(120,255,120)
+
+local FADE_SPEED = 0.18
+local currentAlpha = 0
+
+RunService.RenderStepped:Connect(function()
+    local bestPlot, bestName, bestInfo = findGlobalHighest()
+
+    if not bestInfo then
+        currentAlpha = math.max(0, currentAlpha - FADE_SPEED)
+    else
+        currentAlpha = math.min(1, currentAlpha + FADE_SPEED)
+    end
+
+    local a = currentAlpha
+    TracerMain.Transparency = a
+    TracerGlow.Transparency = 0.25 * a
+    EndDot.Transparency = a
+
+    if a <= 0.01 then
+        TracerMain.Visible = false
+        TracerGlow.Visible = false
+        EndDot.Visible = false
+        return
+    end
+
+    if not bestPlot or not bestName then return end
+
+    local model, root = findAnimalModel(bestPlot, bestName)
+    if not root then return end
+
+    local onScreen, animalPos, _ = isInFOV(root.Position, 60)
+    if not onScreen then
+        TracerMain.Visible = false
+        TracerGlow.Visible = false
+        EndDot.Visible = false
+        return
+    end
+
+    local hudPos = FOZ_HUD.Position
+    local dist = (hudPos - animalPos).Magnitude
+    local thick = math.clamp(dist / 300, 1.8, 4)
+
+    TracerMain.Visible = true
+    TracerMain.Color = Color3.fromRGB(255,255,255)
+    TracerMain.Thickness = thick
+    TracerMain.From = hudPos
+    TracerMain.To = animalPos
+
+    TracerGlow.Visible = true
+    TracerGlow.Color = Color3.fromRGB(120,255,120)
+    TracerGlow.Thickness = thick * 2
+    TracerGlow.From = hudPos
+    TracerGlow.To = animalPos
+
+    EndDot.Visible = true
+    EndDot.Position = animalPos
+    EndDot.Radius = math.clamp(5 + (thick * 0.8), 5, 12)
+end)
+
+--============================================================
+-- YOUR BASE ESP (WHITE VERSION · ON-SCREEN ONLY)
+--============================================================
+local TEXT_FORWARD = 29
+local TEXT_RIGHT   = 0
+local TEXT_UP      = 7
+
+local BaseText = Drawing.new("Text")
+BaseText.Visible = false
+BaseText.Center = true
+BaseText.Size = 25
+BaseText.Font = 2
+BaseText.Outline = true
+BaseText.Color = Color3.fromRGB(255,255,255)
+BaseText.Text = "YOUR BASE"
+pcall(function() BaseText.OutlineColor = Color3.new(0,0,0) end)
+
+local function findMyPlot()
+    for _, plot in ipairs(Plots:GetChildren()) do
+        local sign = plot:FindFirstChild("PlotSign")
+        local gui = sign and sign:FindFirstChild("SurfaceGui")
+        local frame = gui and gui:FindFirstChild("Frame")
+        local label = frame and frame:FindFirstChildWhichIsA("TextLabel")
+        if label then
+            local t = label.Text
+            if t == LocalPlayer.Name or t == LocalPlayer.DisplayName
+            or t:find(LocalPlayer.Name) or t:find(LocalPlayer.DisplayName) then
+                return plot
+            end
+        end
+    end
+end
+
+local MyPlot = findMyPlot()
+
+local function getAnchor(plot)
+    if not plot then return end
+    for _, o in ipairs(plot:GetDescendants()) do
+        if o:IsA("BasePart") then
+            return o
+        end
+    end
+end
+
+local Anchor = getAnchor(MyPlot)
+
+RunService.RenderStepped:Connect(function()
+    if not Anchor or not Anchor.Parent then
+        MyPlot = findMyPlot()
+        Anchor = getAnchor(MyPlot)
+        if not Anchor then BaseText.Visible = false return end
+    end
+
+    local cf = Anchor.CFrame
+    local pos3 =
+        Anchor.Position +
+        cf.LookVector * TEXT_FORWARD +
+        cf.RightVector * TEXT_RIGHT +
+        cf.UpVector * TEXT_UP
+
+    local onScreen, pos2 = isInFOV(pos3, 30)   -- 30 px margin
+    BaseText.Visible = onScreen
+    if onScreen then
+        BaseText.Position = pos2
+    end
+end)
+
+end)
