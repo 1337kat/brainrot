@@ -1,0 +1,314 @@
+--============================================================
+-- LIVE PLOT + ANIMAL + $/s SCANNER + ESP (Highest Only + Text)
+-- WITH PROFESSIONAL FOVEAL-OPTIMAL (FOZ) RATE HUD
+--============================================================
+
+local Players = game:GetService("Players")
+local ReplicatedService = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+
+local Animals = require(ReplicatedService.Datas.Animals)
+local Plots = Workspace:WaitForChild("Plots")
+local Camera = Workspace.CurrentCamera
+
+--============================================================
+-- HELPERS: TEXT PARSING
+--============================================================
+local function cleaned(s)
+    s = s:gsub("<.->","")
+    s = s:gsub("%s+","")
+    return s:lower()
+end
+
+local function looksLikeRate(clean)
+    return clean:match("^%$[%d%.]+[kmb]?/s$") ~= nil
+end
+
+local function parseRate(clean)
+    local num, suf = clean:match("%$(%d+%.?%d*)([kmb]?)/s")
+    num = tonumber(num) or 0
+    if suf == "k" then num *= 1e3 end
+    if suf == "m" then num *= 1e6 end
+    if suf == "b" then num *= 1e9 end
+    return num
+end
+
+--============================================================
+-- *** CLEAN NO-DECIMAL FORMATTER ***
+--============================================================
+local function formatRate(n)
+    if not n then return "(rate not found)" end
+
+    if n >= 1e9 then
+        return string.format("$%dB/s", math.floor(n / 1e9))
+    end
+    if n >= 1e6 then
+        return string.format("$%dM/s", math.floor(n / 1e6))
+    end
+    if n >= 1e3 then
+        return string.format("$%dK/s", math.floor(n / 1e3))
+    end
+
+    return string.format("$%d/s", math.floor(n))
+end
+
+--============================================================
+-- OWNER + ANIMAL DETECTION
+--============================================================
+local function getOwner(plot)
+    local sign = plot:FindFirstChild("PlotSign", true)
+    if not sign then return "Empty Base" end
+
+    local label = sign:FindFirstChildWhichIsA("TextLabel", true)
+    if not label or not label.Text then return "Empty Base" end
+
+    local t = label.Text
+    if t == "Empty Base" or t == "YOUR BASE" then return "Empty Base" end
+
+    return t
+end
+
+local function getAnimals(plot)
+    local list = {}
+    for _, obj in ipairs(plot:GetDescendants()) do
+        if obj:IsA("Model") and Animals[obj.Name] then
+            list[#list + 1] = obj.Name
+        end
+    end
+    table.sort(list)
+    return list
+end
+
+--============================================================
+-- IDENTIFY WHICH PLOT A LABEL BELONGS TO
+--============================================================
+local function findPlot(inst)
+    local cur = inst
+    while cur and cur ~= Workspace do
+        if cur.Parent == Plots then return cur end
+        cur = cur.Parent
+    end
+    return nil
+end
+
+--============================================================
+-- EXTRACT ANIMAL NAME FROM BILLBOARDGUI
+--============================================================
+local function extractAnimalName(rateLabel)
+    local gui = rateLabel:FindFirstAncestorWhichIsA("BillboardGui")
+    if not gui then return nil end
+
+    local name
+    for _, child in ipairs(gui:GetDescendants()) do
+        local ok, txt = pcall(function() return child.Text end)
+        if ok and type(txt) == "string" and txt ~= rateLabel.Text then
+            if not txt:find("%$") then
+                name = txt
+            end
+        end
+    end
+    return name
+end
+
+--============================================================
+-- GLOBAL STATE STORAGE
+--============================================================
+local PlotRates = {}
+local LabelIndex = {}
+
+--============================================================
+-- LABEL TRACKING + PROCESSING
+--============================================================
+local function removeLabelMapping(label)
+    local meta = LabelIndex[label]
+    if not meta then return end
+
+    local plot = meta.plot
+    local animal = meta.animal
+
+    if PlotRates[plot] and PlotRates[plot][animal] then
+        PlotRates[plot][animal] = nil
+        if not next(PlotRates[plot]) then PlotRates[plot] = nil end
+    end
+
+    LabelIndex[label] = nil
+end
+
+local function processLabel(label)
+    local ok, txt = pcall(function() return label.Text end)
+    if not ok or type(txt) ~= "string" then return removeLabelMapping(label) end
+
+    local clean = cleaned(txt)
+    if not looksLikeRate(clean) then return removeLabelMapping(label) end
+
+    local plot = findPlot(label)
+    if not plot then return removeLabelMapping(label) end
+
+    local animalName = extractAnimalName(label)
+    if not animalName then return removeLabelMapping(label) end
+
+    local rate = parseRate(clean)
+
+    PlotRates[plot] = PlotRates[plot] or {}
+    PlotRates[plot][animalName] = { rate = rate, label = label }
+    LabelIndex[label] = { plot = plot, animal = animalName }
+end
+
+--============================================================
+-- INITIAL HOOKING OF DESCENDANTS
+--============================================================
+local function tryHookLabelCandidate(inst)
+    local ok = pcall(function() return inst.Text end)
+    if not ok then return end
+
+    processLabel(inst)
+
+    inst:GetPropertyChangedSignal("Text"):Connect(function()
+        processLabel(inst)
+    end)
+end
+
+for _, inst in ipairs(Workspace:GetDescendants()) do
+    tryHookLabelCandidate(inst)
+end
+
+Workspace.DescendantAdded:Connect(tryHookLabelCandidate)
+Workspace.DescendantRemoving:Connect(function(inst)
+    if LabelIndex[inst] then removeLabelMapping(inst) end
+end)
+
+--============================================================
+-- PRINT INITIAL SNAPSHOT
+--============================================================
+local function printPlotInfo(plot)
+    print("────────────────────────────")
+    print("Plot:", plot.Name)
+    print("Owner:", getOwner(plot))
+
+    local animals = getAnimals(plot)
+    if #animals == 0 then
+        print("Animals: none")
+        return
+    end
+
+    print("Animals + Rates:")
+    local map = PlotRates[plot] or {}
+    for _, name in ipairs(animals) do
+        local info = map[name]
+        local r = info and info.rate
+        print((" • %s (%s)"):format(name, formatRate(r)))
+    end
+end
+
+for _, plot in ipairs(Plots:GetChildren()) do
+    printPlotInfo(plot)
+end
+
+print("[Live Plot+Animal+$Rate+ESP System] Active.")
+
+--============================================================
+-- ESP ON HIGHEST PRODUCER
+--============================================================
+local Circle = Drawing.new("Circle")
+Circle.Thickness = 2
+Circle.Color = Color3.fromRGB(0,255,0)
+Circle.Filled = false
+Circle.NumSides = 32
+Circle.Visible = false
+
+local RateText = Drawing.new("Text")
+RateText.Color = Color3.fromRGB(255,255,255)
+RateText.Size = 18
+RateText.Center = true
+RateText.Outline = true
+RateText.Visible = false
+
+local function findAnimalModel(plot, name)
+    for _, obj in ipairs(plot:GetDescendants()) do
+        if obj:IsA("Model") and obj.Name == name then
+            local root =
+                obj:FindFirstChild("HumanoidRootPart") or
+                obj:FindFirstChild("Root") or
+                obj:FindFirstChild("Head") or
+                obj.PrimaryPart
+            return obj, root
+        end
+    end
+    return nil
+end
+
+local function findGlobalHighest()
+    local bestPlot, bestName, bestInfo
+
+    for plot, map in pairs(PlotRates) do
+        for name, info in pairs(map) do
+            if not bestInfo or info.rate > bestInfo.rate then
+                bestPlot, bestName, bestInfo = plot, name, info
+            end
+        end
+    end
+
+    return bestPlot, bestName, bestInfo
+end
+
+RunService.RenderStepped:Connect(function()
+    local bestPlot, bestName, bestInfo = findGlobalHighest()
+
+    if not bestInfo then
+        Circle.Visible = false
+        RateText.Visible = false
+        return
+    end
+
+    local model, root = findAnimalModel(bestPlot, bestName)
+    if not root then
+        Circle.Visible = false
+        RateText.Visible = false
+        return
+    end
+
+    local pos, onScreen = Camera:WorldToViewportPoint(root.Position)
+    if not onScreen then
+        Circle.Visible = false
+        RateText.Visible = false
+        return
+    end
+
+    Circle.Visible = true
+    Circle.Position = Vector2.new(pos.X, pos.Y)
+    Circle.Radius = math.clamp(320 / math.max(pos.Z, 1), 14, 42)
+
+    RateText.Visible = true
+    RateText.Text = formatRate(bestInfo.rate)
+    RateText.Position = Vector2.new(pos.X, pos.Y - Circle.Radius - 12)
+end)
+
+--============================================================
+-- PROFESSIONAL FOZ (FOVEAL OPTIMAL ZONE) HUD
+-- Slightly above center for lowest eye strain
+--============================================================
+
+local FOZ_HUD = Drawing.new("Text")
+FOZ_HUD.Color = Color3.fromRGB(255, 255, 255)
+FOZ_HUD.Size = 26
+FOZ_HUD.Center = true
+FOZ_HUD.Outline = true
+FOZ_HUD.Visible = true
+
+RunService.RenderStepped:Connect(function()
+    local _, _, bestInfo = findGlobalHighest()
+
+    if bestInfo then
+        FOZ_HUD.Text = formatRate(bestInfo.rate)
+    else
+        FOZ_HUD.Text = "N/A"
+    end
+
+    -- PROFESSIONAL PLACEMENT:
+    -- 10% ABOVE CENTER (foveal optimal zone)
+    FOZ_HUD.Position = Vector2.new(
+        Camera.ViewportSize.X / 2,
+        (Camera.ViewportSize.Y / 2) - (Camera.ViewportSize.Y * 0.10)
+    )
+end)
